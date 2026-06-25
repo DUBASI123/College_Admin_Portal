@@ -16,7 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-const API_URL = 'http://localhost:5050/api';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5050/api';
 
 export default function AdminPortal() {
   const [token, setToken] = useState(localStorage.getItem('myvault_admin_token') || '');

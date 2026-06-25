@@ -1,14 +1,10 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
 import { run, query, get, generateUUID } from '../db.js';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'myvault_jwt_secret_key_12345';
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Admin Auth Middleware
 const authenticateAdmin = (req, res, next) => {
@@ -31,22 +27,12 @@ const authenticateAdmin = (req, res, next) => {
   }
 };
 
-// Multer Storage Configuration for uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = join(__dirname, '../../uploads');
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    cb(null, `${uniqueSuffix}-${cleanName}`);
-  }
+// Multer Memory Storage - keeps files in RAM for direct Cloudinary upload
+// No disk writes needed, safe for cloud/ephemeral environments (Render, Railway, etc.)
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB max
 });
-const upload = multer({ storage });
 
 // Mount auth middleware to all endpoints
 router.use(authenticateAdmin);
@@ -257,8 +243,8 @@ router.post('/content', upload.single('file'), async (req, res) => {
       fileName = req.file.originalname;
       fileSize = req.file.size;
       try {
-        const fileBuffer = fs.readFileSync(req.file.path);
-        const base64File = `data:${req.file.mimetype};base64,${fileBuffer.toString('base64')}`;
+        // Use buffer directly from memoryStorage (no disk read needed)
+        const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
         
         console.log(`Uploading file ${fileName} to Cloudinary...`);
         const cloudRes = await fetch('https://api.cloudinary.com/v1_1/dtdb4irno/auto/upload', {
@@ -281,18 +267,11 @@ router.post('/content', upload.single('file'), async (req, res) => {
           fileUrl = cloudData.secure_url;
           console.log('Successfully uploaded file to Cloudinary:', fileUrl);
         } else {
-          throw new Error('No secure_url returned from Cloudinary');
-        }
-
-        // Clean up local temp file
-        try {
-          fs.unlinkSync(req.file.path);
-        } catch (unlinkErr) {
-          console.warn('Failed to delete temporary file:', unlinkErr.message);
+          throw new Error('No secure_url returned from Cloudinary: ' + JSON.stringify(cloudData));
         }
       } catch (uploadErr) {
-        console.error('Cloudinary upload failed, falling back to local file serving:', uploadErr.message);
-        fileUrl = `/uploads/${req.file.filename}`;
+        console.error('Cloudinary upload failed:', uploadErr.message);
+        return res.status(500).json({ error: 'File upload failed. Please try again.', message: uploadErr.message });
       }
     } else {
       fileUrl = req.body.fileUrl || '';
