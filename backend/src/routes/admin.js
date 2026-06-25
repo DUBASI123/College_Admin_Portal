@@ -1,0 +1,602 @@
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { run, query, get, generateUUID } from '../db.js';
+
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'myvault_jwt_secret_key_12345';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Admin Auth Middleware
+const authenticateAdmin = (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.role !== 'admin') {
+      return res.status(403).json({ error: 'Forbidden: Admin role required' });
+    }
+    req.admin = decoded; // { id, role, college_id }
+    next();
+  } catch (err) {
+    console.error('JWT Verification Error:', err.message);
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+};
+
+// Multer Storage Configuration for uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = join(__dirname, '../../uploads');
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const cleanName = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    cb(null, `${uniqueSuffix}-${cleanName}`);
+  }
+});
+const upload = multer({ storage });
+
+// Mount auth middleware to all endpoints
+router.use(authenticateAdmin);
+
+// ==========================================
+// 1. Student Approvals
+// ==========================================
+
+// Get students for admin's college (filter by status optional)
+router.get('/students', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    const { status } = req.query; // 'pending', 'approved', 'rejected'
+
+    let sql;
+    let params = [collegeId];
+
+    if (process.env.DB_TYPE === 'postgres') {
+      sql = `
+        SELECT s.id, s.first_name || ' ' || s.last_name AS name, s.email, s.mobile AS phone, s.hall_ticket AS roll_number, s.year_of_study, 
+               LOWER(s.verification_status) AS status, s.rejection_reason, s.created_at,
+               s.branch AS department_name, s.branch AS department_code
+        FROM students s
+        WHERE s.college_id = ? AND s.role = 'student'
+      `;
+
+      if (status) {
+        // Map pending/approved/rejected filter to Case-sensitive DB equivalents
+        let mappedStatus = 'Pending';
+        if (status === 'approved') mappedStatus = 'Approved';
+        if (status === 'rejected') mappedStatus = 'Rejected';
+        
+        sql += ' AND s.verification_status = ?';
+        params.push(mappedStatus);
+      }
+
+      sql += ' ORDER BY s.created_at DESC';
+    } else {
+      sql = `
+        SELECT s.id, s.name, s.email, s.phone, s.roll_number, s.year_of_study, s.status, s.rejection_reason, s.created_at,
+               d.name as department_name, d.code as department_code
+        FROM students s
+        LEFT JOIN departments d ON s.department_id = d.id
+        WHERE s.college_id = ?
+      `;
+
+      if (status) {
+        sql += ' AND s.status = ?';
+        params.push(status);
+      }
+
+      sql += ' ORDER BY s.created_at DESC';
+    }
+
+    const students = await query(sql, params);
+    res.json(students);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch students', message: err.message });
+  }
+});
+
+// Approve a student
+router.post('/students/:id/approve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const collegeId = req.admin.college_id;
+
+    // Verify student belongs to this admin's college
+    const student = await get('SELECT id FROM students WHERE id = ? AND college_id = ?', [id, collegeId]);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found in this college' });
+    }
+
+    if (process.env.DB_TYPE === 'postgres') {
+      await run(
+        `UPDATE students
+         SET verification_status = 'Approved', is_verified = TRUE, rejection_reason = NULL
+         WHERE id = ?`,
+        [id]
+      );
+
+      // Create a live notification record for the student in Supabase
+      try {
+        await run(
+          `INSERT INTO notifications (id, title, body, type)
+           VALUES (?, 'Registration Approved', 'Your registration request has been approved by your college administrator.', 'general')`,
+          [generateUUID()]
+        );
+      } catch (err) {
+        console.warn('Failed to insert approval notification:', err.message);
+      }
+    } else {
+      await run(
+        `UPDATE students
+         SET status = 'approved', approved_by = ?, approved_at = CURRENT_TIMESTAMP, rejection_reason = NULL
+         WHERE id = ?`,
+        [req.admin.id, id]
+      );
+    }
+
+    res.json({ message: 'Student registration approved successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to approve student', message: err.message });
+  }
+});
+
+// Reject a student
+router.post('/students/:id/reject', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const collegeId = req.admin.college_id;
+
+    // Verify student belongs to this admin's college
+    const student = await get('SELECT id FROM students WHERE id = ? AND college_id = ?', [id, collegeId]);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found in this college' });
+    }
+
+    if (process.env.DB_TYPE === 'postgres') {
+      await run(
+        `UPDATE students
+         SET verification_status = 'Rejected', is_verified = FALSE, rejection_reason = ?
+         WHERE id = ?`,
+        [reason || 'Rejected by administrator', id]
+      );
+
+      // Create a live notification record for the student in Supabase
+      try {
+        await run(
+          `INSERT INTO notifications (id, title, body, type)
+           VALUES (?, 'Registration Rejected', 'Your registration request was rejected by your college administrator.', 'general')`,
+          [generateUUID()]
+        );
+      } catch (err) {
+        console.warn('Failed to insert rejection notification:', err.message);
+      }
+    } else {
+      await run(
+        `UPDATE students
+         SET status = 'rejected', approved_by = ?, approved_at = CURRENT_TIMESTAMP, rejection_reason = ?
+         WHERE id = ?`,
+        [req.admin.id, reason || 'No reason provided', id]
+      );
+    }
+
+    res.json({ message: 'Student registration rejected' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reject student', message: err.message });
+  }
+});
+
+
+// ==========================================
+// 2. Academic Content Hub
+// ==========================================
+
+// Get all uploaded content for admin's college
+router.get('/content', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    let contentList;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      contentList = await query(
+        `SELECT c.id, c.title, c.description, c.content_type, c.file_url, c.created_at,
+                s.name AS subject, s.semester, s.branch AS department_name, s.branch AS department_code,
+                u.first_name || ' ' || u.last_name AS admin_name
+         FROM academic_contents c
+         LEFT JOIN subjects s ON c.subject_id = s.id
+         LEFT JOIN students u ON c.uploaded_by = u.id
+         WHERE s.id IS NOT NULL AND u.college_id = ?
+         ORDER BY c.created_at DESC`,
+        [collegeId]
+      );
+    } else {
+      const sql = `
+        SELECT c.*, d.name as department_name, d.code as department_code, a.name as admin_name
+        FROM content c
+        LEFT JOIN departments d ON c.department_id = d.id
+        LEFT JOIN admins a ON c.uploaded_by = a.id
+        WHERE c.college_id = ?
+        ORDER BY c.created_at DESC
+      `;
+      contentList = await query(sql, [collegeId]);
+    }
+    res.json(contentList);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch content', message: err.message });
+  }
+});
+
+// Upload new content
+router.post('/content', upload.single('file'), async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    const { title, description, contentType, departmentId, subject, semester, yearTarget } = req.body;
+
+    if (!title || !contentType) {
+      return res.status(400).json({ error: 'Title and content type are required' });
+    }
+
+    let fileUrl = '';
+    let fileName = '';
+    let fileSize = 0;
+
+    if (req.file) {
+      fileName = req.file.originalname;
+      fileSize = req.file.size;
+      try {
+        const fileBuffer = fs.readFileSync(req.file.path);
+        const base64File = `data:${req.file.mimetype};base64,${fileBuffer.toString('base64')}`;
+        
+        console.log(`Uploading file ${fileName} to Cloudinary...`);
+        const cloudRes = await fetch('https://api.cloudinary.com/v1_1/dtdb4irno/auto/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            file: base64File,
+            upload_preset: 'myvault_unsigned'
+          })
+        });
+
+        if (!cloudRes.ok) {
+          const errText = await cloudRes.text();
+          console.error('Cloudinary upload response failed:', errText);
+          throw new Error('Cloudinary API returned status ' + cloudRes.status);
+        }
+
+        const cloudData = await cloudRes.json();
+        if (cloudData.secure_url) {
+          fileUrl = cloudData.secure_url;
+          console.log('Successfully uploaded file to Cloudinary:', fileUrl);
+        } else {
+          throw new Error('No secure_url returned from Cloudinary');
+        }
+
+        // Clean up local temp file
+        try {
+          fs.unlinkSync(req.file.path);
+        } catch (unlinkErr) {
+          console.warn('Failed to delete temporary file:', unlinkErr.message);
+        }
+      } catch (uploadErr) {
+        console.error('Cloudinary upload failed, falling back to local file serving:', uploadErr.message);
+        fileUrl = `/uploads/${req.file.filename}`;
+      }
+    } else {
+      fileUrl = req.body.fileUrl || '';
+    }
+
+    const contentId = generateUUID();
+
+    if (process.env.DB_TYPE === 'postgres') {
+      // Find or create subject first
+      const branchName = departmentId || 'CSE';
+      const semNumber = semester ? parseInt(semester) : 1;
+
+      let subjectRow = await get(
+        'SELECT id FROM subjects WHERE name = ? AND branch = ? AND semester = ?',
+        [subject || 'General', branchName, semNumber]
+      );
+
+      if (!subjectRow) {
+        const newSubjectId = generateUUID();
+        await run(
+          'INSERT INTO subjects (id, name, branch, semester) VALUES (?, ?, ?, ?)',
+          [newSubjectId, subject || 'General', branchName, semNumber]
+        );
+        subjectRow = { id: newSubjectId };
+      }
+
+      await run(
+        `INSERT INTO academic_contents (id, subject_id, title, content_type, description, file_url, uploaded_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [contentId, subjectRow.id, title, contentType, description || '', fileUrl, req.admin.id]
+      );
+    } else {
+      await run(
+        `INSERT INTO content (id, college_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          contentId, collegeId, departmentId || null, req.admin.id, title, description || '',
+          contentType, fileUrl, fileSize, fileName, subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
+        ]
+      );
+    }
+
+    res.status(201).json({ message: 'Content uploaded successfully', contentId });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to upload content', message: err.message });
+  }
+});
+
+// Delete content
+router.delete('/content/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const collegeId = req.admin.college_id;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      const contentItem = await get('SELECT file_url FROM academic_contents WHERE id = ?', [id]);
+      if (!contentItem) {
+        return res.status(404).json({ error: 'Content not found' });
+      }
+
+      if (contentItem.file_url && contentItem.file_url.startsWith('/uploads/')) {
+        const filePath = join(__dirname, '../../', contentItem.file_url);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      await run('DELETE FROM academic_contents WHERE id = ?', [id]);
+    } else {
+      // Verify ownership
+      const contentItem = await get('SELECT file_url FROM content WHERE id = ? AND college_id = ?', [id, collegeId]);
+      if (!contentItem) {
+        return res.status(404).json({ error: 'Content not found' });
+      }
+
+      // Delete file if it exists locally
+      if (contentItem.file_url && contentItem.file_url.startsWith('/uploads/')) {
+        const filePath = join(__dirname, '../../', contentItem.file_url);
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
+      }
+
+      await run('DELETE FROM content WHERE id = ?', [id]);
+    }
+    res.json({ message: 'Content deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete content', message: err.message });
+  }
+});
+
+
+// ==========================================
+// 3. Career & Placement Opportunities
+// ==========================================
+
+// Get all opportunities
+router.get('/opportunities', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    let opps;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      opps = await query(
+        `SELECT id, company, role AS title, type, domain AS description, stipend AS salary_range, 
+                duration, deadline, apply_link, status, created_at, 1 AS is_active, college_id
+         FROM internships
+         ORDER BY created_at DESC`
+      );
+    } else {
+      opps = await query(
+        'SELECT * FROM opportunities WHERE college_id = ? ORDER BY created_at DESC',
+        [collegeId]
+      );
+    }
+    res.json(opps);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch opportunities', message: err.message });
+  }
+});
+
+// Post an opportunity
+router.post('/opportunities', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    const { title, company, description, type, location, salaryRange, eligibility, applyLink, deadline } = req.body;
+
+    if (!title || !company) {
+      return res.status(400).json({ error: 'Title and company are required' });
+    }
+
+    const oppId = generateUUID();
+
+    if (process.env.DB_TYPE === 'postgres') {
+      await run(
+        `INSERT INTO internships (id, company, role, type, domain, stipend, duration, deadline, apply_link, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
+        [
+          oppId, company, title, type || 'internship', description || '', 
+          salaryRange || '', deadline || '', deadline || '', applyLink || ''
+        ]
+      );
+    } else {
+      await run(
+        `INSERT INTO opportunities (id, college_id, posted_by, title, company, description, type, location, salary_range, eligibility, apply_link, deadline)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          oppId, collegeId, req.admin.id, title, company, description || '', type || 'job',
+          location || '', salaryRange || '', eligibility || '', applyLink || '', deadline || null
+        ]
+      );
+    }
+
+    res.status(201).json({ message: 'Opportunity posted successfully', oppId });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to post opportunity', message: err.message });
+  }
+});
+
+// Delete an opportunity
+router.delete('/opportunities/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const collegeId = req.admin.college_id;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      const opp = await get('SELECT id FROM internships WHERE id = ?', [id]);
+      if (!opp) {
+        return res.status(404).json({ error: 'Opportunity not found' });
+      }
+      await run('DELETE FROM internships WHERE id = ?', [id]);
+    } else {
+      const opp = await get('SELECT id FROM opportunities WHERE id = ? AND college_id = ?', [id, collegeId]);
+      if (!opp) {
+        return res.status(404).json({ error: 'Opportunity not found' });
+      }
+      await run('DELETE FROM opportunities WHERE id = ?', [id]);
+    }
+    res.json({ message: 'Opportunity deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete opportunity', message: err.message });
+  }
+});
+
+
+// ==========================================
+// 4. Notifications Hub
+// ==========================================
+
+// Get sent notifications
+router.get('/notifications', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    let notes;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      notes = await query(
+        `SELECT id, title, body, type, created_at AS sent_at, 
+                NULL AS department_name, NULL AS department_code
+         FROM notifications
+         ORDER BY created_at DESC`
+      );
+    } else {
+      notes = await query(
+        `SELECT n.*, d.name as department_name, d.code as department_code
+         FROM notifications n
+         LEFT JOIN departments d ON n.target_dept_id = d.id
+         WHERE n.college_id = ?
+         ORDER BY n.sent_at DESC`,
+        [collegeId]
+      );
+    }
+    res.json(notes);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch notifications', message: err.message });
+  }
+});
+
+// Dispatch notification
+router.post('/notifications', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    const { title, body, type, targetAll, targetYear, targetDeptId } = req.body;
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'Title and body are required' });
+    }
+
+    const noteId = generateUUID();
+
+    if (process.env.DB_TYPE === 'postgres') {
+      await run(
+        `INSERT INTO notifications (id, title, body, type)
+         VALUES (?, ?, ?, ?)`,
+        [noteId, title, body, type || 'general']
+      );
+    } else {
+      await run(
+        `INSERT INTO notifications (id, college_id, sent_by, title, body, type, target_all, target_year, target_dept_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          noteId, collegeId, req.admin.id, title, body, type || 'general',
+          targetAll ? 1 : 0, targetYear ? parseInt(targetYear) : null, targetDeptId || null
+        ]
+      );
+    }
+
+    res.status(201).json({ message: 'Notification dispatched successfully', noteId });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to send notification', message: err.message });
+  }
+});
+
+
+// ==========================================
+// 5. Dashboard Analytics
+// ==========================================
+router.get('/analytics', async (req, res) => {
+  try {
+    const collegeId = req.admin.college_id;
+    let totalStudents, pendingStudents, approvedStudents, totalContent, totalOpps, deptBreakdown;
+
+    if (process.env.DB_TYPE === 'postgres') {
+      totalStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student'", [collegeId]);
+      pendingStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student' AND verification_status = 'Pending'", [collegeId]);
+      approvedStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student' AND verification_status = 'Approved'", [collegeId]);
+      totalContent = await get("SELECT COUNT(*)::int as count FROM academic_contents");
+      totalOpps = await get("SELECT COUNT(*)::int as count FROM internships WHERE status = 'Open'");
+
+      deptBreakdown = await query(
+        `SELECT branch AS department_name, branch AS department_code, COUNT(id)::int as student_count
+         FROM students
+         WHERE college_id = ? AND role = 'student' AND verification_status = 'Approved'
+         GROUP BY branch`,
+        [collegeId]
+      );
+    } else {
+      totalStudents = await get('SELECT COUNT(*) as count FROM students WHERE college_id = ?', [collegeId]);
+      pendingStudents = await get("SELECT COUNT(*) as count FROM students WHERE college_id = ? AND status = 'pending'", [collegeId]);
+      approvedStudents = await get("SELECT COUNT(*) as count FROM students WHERE college_id = ? AND status = 'approved'", [collegeId]);
+      totalContent = await get('SELECT COUNT(*) as count FROM content WHERE college_id = ?', [collegeId]);
+      totalOpps = await get('SELECT COUNT(*) as count FROM opportunities WHERE college_id = ? AND is_active = 1', [collegeId]);
+
+      deptBreakdown = await query(
+        `SELECT d.name as department_name, d.code as department_code, COUNT(s.id) as student_count
+         FROM departments d
+         LEFT JOIN students s ON d.id = s.department_id AND s.status = 'approved'
+         WHERE d.college_id = ?
+         GROUP BY d.id`,
+        [collegeId]
+      );
+    }
+
+    res.json({
+      totalStudents: totalStudents.count,
+      pendingStudents: pendingStudents.count,
+      approvedStudents: approvedStudents.count,
+      totalContent: totalContent.count,
+      totalOpps: totalOpps.count,
+      deptBreakdown
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to compile analytics', message: err.message });
+  }
+});
+
+export default router;

@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # 1. Nginx Web Router & Frontend Server
+  web:
+    image: nginx:alpine
+    container_name: myvault-web-router
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../frontend/dist:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: always
+
+  # 2. Express API Backend
+  api:
+    build: .
+    container_name: myvault-api
+    ports:
+      - "5050:5050"
+    environment:
+      - PORT=5050
+      - JWT_SECRET=myvault_production_jwt_secret_key_98765
+      - DB_TYPE=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=myvault_user
+      - DB_PASSWORD=myvault_password
+      - DB_NAME=myvault_db
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      - db
+    restart: always
+
+  # 3. PostgreSQL Production Database
+  db:
+    image: postgres:15-alpine
+    container_name: myvault-postgres-db
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=myvault_user
+      - POSTGRES_PASSWORD=myvault_password
+      - POSTGRES_DB=myvault_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    restart: always
+
+  # 4. Database Web GUI Console
+  adminer:
+    image: adminer:latest
+    container_name: myvault-db-adminer
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    restart: always
+
+volumes:
+  postgres_data:
