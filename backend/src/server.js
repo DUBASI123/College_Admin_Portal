@@ -25,6 +25,22 @@ if (!fs.existsSync(uploadsDir)) {
 // Serve uploaded files statically
 app.use('/uploads', express.static(uploadsDir));
 
+// Serve the built React Admin Portal and APK from /public
+const publicDir = join(__dirname, '../public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+}
+
+// APK direct download route
+app.get('/download/apk', (req, res) => {
+  const apkPath = join(__dirname, '../public/MyVault-release.apk');
+  if (fs.existsSync(apkPath)) {
+    res.download(apkPath, 'MyVault.apk');
+  } else {
+    res.status(404).json({ error: 'APK not found' });
+  }
+});
+
 // Logging Middleware
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
@@ -41,9 +57,14 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
-// Catch-all 404
+// Catch-all: serve React SPA for all non-API routes
 app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint not found' });
+  const indexPath = join(__dirname, '../public/index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ error: 'Endpoint not found' });
+  }
 });
 
 // Global Error Handler
