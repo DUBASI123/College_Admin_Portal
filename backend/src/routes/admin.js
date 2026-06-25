@@ -247,35 +247,33 @@ router.post('/content', upload.single('file'), async (req, res) => {
         const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
         
         // Detect Cloudinary resource type based on MIME type
-        // Documents (PDF, DOCX, PPT, etc.) must use 'raw', images use 'image', videos use 'video'
         const mime = req.file.mimetype.toLowerCase();
-        let cloudinaryResourceType = 'raw'; // default for all documents
+        let cloudinaryResourceType = 'raw'; // default for docs, PDFs, DOCX, PPT
         if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
         else if (mime.startsWith('video/')) cloudinaryResourceType = 'video';
-        
-        console.log(`Uploading file ${fileName} (${mime}) to Cloudinary as resource_type: ${cloudinaryResourceType}...`);
-        const cloudRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${cloudinaryResourceType}/upload`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            file: base64File,
-            upload_preset: 'myvault_unsigned'
-          })
-        });
 
-        if (!cloudRes.ok) {
-          const errText = await cloudRes.text();
-          console.error('Cloudinary upload response failed:', errText);
-          throw new Error('Cloudinary API returned status ' + cloudRes.status + ': ' + errText);
+        // Helper to try a Cloudinary upload with given resource type
+        const tryCloudinaryUpload = async (resourceType) => {
+          const res = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ file: base64File, upload_preset: 'myvault_unsigned' })
+          });
+          const data = await res.json();
+          if (data.secure_url) return data.secure_url;
+          throw new Error(data.error?.message || JSON.stringify(data));
+        };
+
+        console.log(`Uploading ${fileName} (${mime}) to Cloudinary as [${cloudinaryResourceType}]...`);
+        try {
+          fileUrl = await tryCloudinaryUpload(cloudinaryResourceType);
+        } catch (firstErr) {
+          // Fallback: if specific type fails, try 'raw' (works for any file type)
+          console.warn(`Primary upload failed (${firstErr.message}), retrying as raw...`);
+          fileUrl = await tryCloudinaryUpload('raw');
         }
 
-        const cloudData = await cloudRes.json();
-        if (cloudData.secure_url) {
-          fileUrl = cloudData.secure_url;
-          console.log('Successfully uploaded file to Cloudinary:', fileUrl);
-        } else {
-          throw new Error('No secure_url returned from Cloudinary: ' + JSON.stringify(cloudData));
-        }
+        console.log('Successfully uploaded to Cloudinary:', fileUrl);
       } catch (uploadErr) {
         console.error('Cloudinary upload failed:', uploadErr.message);
         return res.status(500).json({ error: 'File upload failed. Please try again.', message: uploadErr.message });
