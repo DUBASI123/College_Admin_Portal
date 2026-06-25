@@ -246,8 +246,15 @@ router.post('/content', upload.single('file'), async (req, res) => {
         // Use buffer directly from memoryStorage (no disk read needed)
         const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
         
-        console.log(`Uploading file ${fileName} to Cloudinary...`);
-        const cloudRes = await fetch('https://api.cloudinary.com/v1_1/dtdb4irno/auto/upload', {
+        // Detect Cloudinary resource type based on MIME type
+        // Documents (PDF, DOCX, PPT, etc.) must use 'raw', images use 'image', videos use 'video'
+        const mime = req.file.mimetype.toLowerCase();
+        let cloudinaryResourceType = 'raw'; // default for all documents
+        if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
+        else if (mime.startsWith('video/')) cloudinaryResourceType = 'video';
+        
+        console.log(`Uploading file ${fileName} (${mime}) to Cloudinary as resource_type: ${cloudinaryResourceType}...`);
+        const cloudRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${cloudinaryResourceType}/upload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({
@@ -259,7 +266,7 @@ router.post('/content', upload.single('file'), async (req, res) => {
         if (!cloudRes.ok) {
           const errText = await cloudRes.text();
           console.error('Cloudinary upload response failed:', errText);
-          throw new Error('Cloudinary API returned status ' + cloudRes.status);
+          throw new Error('Cloudinary API returned status ' + cloudRes.status + ': ' + errText);
         }
 
         const cloudData = await cloudRes.json();
