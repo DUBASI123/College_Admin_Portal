@@ -243,9 +243,6 @@ router.post('/content', upload.single('file'), async (req, res) => {
       fileName = req.file.originalname;
       fileSize = req.file.size;
       try {
-        // Use buffer directly from memoryStorage (no disk read needed)
-        const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-        
         // Detect Cloudinary resource type based on MIME type
         const mime = req.file.mimetype.toLowerCase();
         let cloudinaryResourceType = 'raw'; // default for docs, PDFs, DOCX, PPT
@@ -253,13 +250,19 @@ router.post('/content', upload.single('file'), async (req, res) => {
         else if (mime.startsWith('video/')) cloudinaryResourceType = 'video';
 
         // Helper to try a Cloudinary upload with given resource type
+        // Uses multipart FormData (much more reliable than base64 for documents)
         const tryCloudinaryUpload = async (resourceType) => {
-          const res = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
+          const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+          const formData = new FormData();
+          formData.append('file', blob, req.file.originalname);
+          formData.append('upload_preset', 'myvault_unsigned');
+
+          const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({ file: base64File, upload_preset: 'myvault_unsigned' })
+            body: formData
           });
-          const data = await res.json();
+          const data = await uploadRes.json();
+          console.log(`Cloudinary response [${resourceType}]:`, JSON.stringify(data).substring(0, 500));
           if (data.secure_url) return data.secure_url;
           throw new Error(data.error?.message || JSON.stringify(data));
         };
@@ -270,7 +273,11 @@ router.post('/content', upload.single('file'), async (req, res) => {
         } catch (firstErr) {
           // Fallback: if specific type fails, try 'raw' (works for any file type)
           console.warn(`Primary upload failed (${firstErr.message}), retrying as raw...`);
-          fileUrl = await tryCloudinaryUpload('raw');
+          if (cloudinaryResourceType !== 'raw') {
+            fileUrl = await tryCloudinaryUpload('raw');
+          } else {
+            throw firstErr;
+          }
         }
 
         console.log('Successfully uploaded to Cloudinary:', fileUrl);
