@@ -22,14 +22,26 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
+// Logging Middleware (before all routes so we can see every request)
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
+
+// Health Check (high priority, always available)
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// ============================
+// API Routes FIRST (before static files!)
+// ============================
+app.use('/api/auth', authRouter);
+app.use('/api/admin', adminRouter);
+app.use('/api/student', studentRouter);
+
 // Serve uploaded files statically
 app.use('/uploads', express.static(uploadsDir));
-
-// Serve the built React Admin Portal and APK from /public
-const publicDir = join(__dirname, '../public');
-if (fs.existsSync(publicDir)) {
-  app.use(express.static(publicDir));
-}
 
 // APK direct download route
 app.get('/download/apk', (req, res) => {
@@ -41,29 +53,24 @@ app.get('/download/apk', (req, res) => {
   }
 });
 
-// Logging Middleware
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
+// Serve the built React Admin Portal from /public
+const publicDir = join(__dirname, '../public');
+if (fs.existsSync(publicDir)) {
+  app.use(express.static(publicDir));
+}
 
-// API Routes
-app.use('/api/auth', authRouter);
-app.use('/api/admin', adminRouter);
-app.use('/api/student', studentRouter);
-
-// Health Check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', time: new Date().toISOString() });
-});
-
-// Catch-all: serve React SPA for all non-API routes
+// Catch-all: serve React SPA ONLY for non-API routes
 app.use((req, res) => {
+  // If the request was for an API route that wasn't matched, return 404 JSON
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API endpoint not found', path: req.path });
+  }
+  // Otherwise serve the SPA
   const indexPath = join(__dirname, '../public/index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).json({ error: 'Endpoint not found' });
+    res.status(404).json({ error: 'Not found' });
   }
 });
 
