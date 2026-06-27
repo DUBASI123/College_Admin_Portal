@@ -48,6 +48,44 @@ app.get('/download/apk', (req, res) => {
   res.redirect('https://oawomrlsitttrbulxgyk.supabase.co/storage/v1/object/public/academic-files/MyVault-release.apk');
 });
 
+// General file download proxy (useful to force browser downloads for Cloudinary raw resources)
+app.get('/api/download-proxy', async (req, res) => {
+  try {
+    const fileUrl = req.query.url;
+    if (!fileUrl) {
+      return res.status(400).json({ error: 'URL parameter is required' });
+    }
+
+    const fetchRes = await fetch(fileUrl);
+    if (!fetchRes.ok) {
+      return res.redirect(fileUrl); // fallback to raw URL on failure
+    }
+
+    let filename = req.query.filename || 'document';
+    // Ensure filename has extension if url has one
+    try {
+      const parsedUrl = new URL(fileUrl);
+      const segments = parsedUrl.pathname.split('/');
+      if (segments.length > 0) {
+        const lastSegment = segments[segments.length - 1];
+        if (lastSegment.includes('.') && !filename.includes('.')) {
+          filename += `.${lastSegment.split('.').pop()}`;
+        }
+      }
+    } catch (_) {}
+
+    const contentType = fetchRes.headers.get('content-type') || 'application/octet-stream';
+    const arrayBuffer = await fetchRes.arrayBuffer();
+
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+    res.setHeader('Content-Type', contentType);
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error('[Proxy] Download error:', err);
+    res.redirect(req.query.url); // fallback to raw URL on error
+  }
+});
+
 // Serve the built React Admin Portal from /public
 const publicDir = join(__dirname, '../public');
 if (fs.existsSync(publicDir)) {
