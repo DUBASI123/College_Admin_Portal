@@ -8,6 +8,7 @@ build/
 database.db
 uploads/
 *.apk
+!backend/public/MyVault-release.apk
 
 # Editor files
 .idea/

@@ -43,14 +43,9 @@ app.use('/api/student', studentRouter);
 // Serve uploaded files statically
 app.use('/uploads', express.static(uploadsDir));
 
-// APK direct download route
+// APK direct download route (redirect to Supabase CDN for instant and fast download)
 app.get('/download/apk', (req, res) => {
-  const apkPath = join(__dirname, '../public/MyVault-release.apk');
-  if (fs.existsSync(apkPath)) {
-    res.download(apkPath, 'MyVault.apk');
-  } else {
-    res.status(404).json({ error: 'APK not found' });
-  }
+  res.redirect('https://oawomrlsitttrbulxgyk.supabase.co/storage/v1/object/public/academic-files/MyVault-release.apk');
 });
 
 // Serve the built React Admin Portal from /public
