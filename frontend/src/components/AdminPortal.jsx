@@ -487,78 +487,17 @@ export default function AdminPortal() {
           {!isLogin && (
             <>
               <div className="form-group">
-                <label className="form-label">College Management</label>
-                <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem' }}>
-                    <input 
-                      type="radio" 
-                      name="collegeMode" 
-                      checked={collegeMode === 'existing'}
-                      onChange={() => setCollegeMode('existing')}
-                    />
-                    Existing College
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.85rem' }}>
-                    <input 
-                      type="radio" 
-                      name="collegeMode" 
-                      checked={collegeMode === 'create'}
-                      onChange={() => setCollegeMode('create')}
-                    />
-                    Register New College
-                  </label>
-                </div>
+                <label className="form-label">Select College</label>
+                <select 
+                  className="form-select"
+                  value={selectedCollegeId}
+                  onChange={(e) => setSelectedCollegeId(e.target.value)}
+                >
+                  {colleges.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}{c.district ? ` — ${c.district}` : ''}{c.college_type ? ` (${c.college_type})` : ''}</option>
+                  ))}
+                </select>
               </div>
-
-              {collegeMode === 'existing' ? (
-                <div className="form-group">
-                  <label className="form-label">Select College</label>
-                  <select 
-                    className="form-select"
-                    value={selectedCollegeId}
-                    onChange={(e) => setSelectedCollegeId(e.target.value)}
-                  >
-                    {colleges.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}{c.district ? ` — ${c.district}` : ''}{c.college_type ? ` (${c.college_type})` : ''}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div style={{ padding: '1rem', border: '1px solid var(--border-color)', borderRadius: '8px', marginBottom: '1rem', background: 'var(--bg-tertiary)' }}>
-                  <div className="form-group">
-                    <label className="form-label">New College Name</label>
-                    <input 
-                      type="text" 
-                      className="form-input" 
-                      placeholder="e.g. Stanford University"
-                      value={newCollegeName}
-                      onChange={(e) => setNewCollegeName(e.target.value)}
-                    />
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                    <div className="form-group">
-                      <label className="form-label">College Code</label>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        placeholder="e.g. SU"
-                        value={newCollegeCode}
-                        onChange={(e) => setNewCollegeCode(e.target.value)}
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Website</label>
-                      <input 
-                        type="text" 
-                        className="form-input" 
-                        placeholder="e.g. stanford.edu"
-                        value={newCollegeWebsite}
-                        onChange={(e) => setNewCollegeWebsite(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
 
               <div className="form-group">
                 <label className="form-label">Your Full Name</label>
