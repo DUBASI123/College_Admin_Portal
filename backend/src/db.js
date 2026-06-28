@@ -273,16 +273,16 @@ export const initDb = async () => {
     console.log('Seeding initial mock data into database...');
     
     // Colleges
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_nitw', 'National Institute of Technology (NIT) Warangal', 'NITW', 'nitw.ac.in')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_kitsw', 'Kakatiya Institute of Technology & Science (KITS) Warangal', 'KITSW', 'kitsw.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_nitw', 'NIT Warangal', 'NITW', 'nitw.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_kitsw', 'KITS Warangal', 'KITSW', 'kitsw.ac.in')");
     await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_vcew', 'Vaagdevi College of Engineering', 'VCEW', 'vaagdevi.edu.in')");
     await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_sru', 'SR University', 'SRU', 'sru.edu.in')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_arti', \"Aurora's Research and Technological Institute\", 'ARTI', 'aurora.edu.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_svs', 'SVS Group of Institutions', 'SVS', 'svs.edu.in')");
     await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_tpce', 'Talla Padmavathi College of Engineering', 'TPCE', 'tallapadmavathi.org')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_sritw', 'Sumathi Reddy Institute of Technology for Women', 'SRITW', 'sritw.org')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_jits', 'Jayamukhi Institute of Technological Sciences', 'JITS', 'jits.in')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_bies', 'Balaji Institute of Engineering and Sciences', 'BIES', 'balajigroups.org')");
-    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_jits2', 'Jaya Institute of Technology & Science', 'JITS2', 'jayaits.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_cits', 'Chaitanya Institute of Technology and Science', 'CITS', 'cits.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_arti', \"Ramappa Engineering College (Aurora's Research and Technological Institute)\", 'ARTI', 'aurora.edu.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_bits', 'Balaji Institute of Technology & Science (BITS)', 'BITS', 'bitswgl.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_wits', 'Warangal Institute of Technology and Science', 'WITS', 'wits.ac.in')");
 
     // Departments
     const suCse = 'dept-nitw-cse';
