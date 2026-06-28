@@ -1,9 +1,14 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
 import { get, run, query, generateUUID } from '../db.js';
 
 const router = express.Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 }
+});
 const JWT_SECRET = process.env.JWT_SECRET || 'myvault_jwt_secret_key_12345';
 
 // 1. Get all colleges (for registration dropdowns)
@@ -44,13 +49,12 @@ router.get('/colleges/:collegeId/departments', async (req, res) => {
 });
 
 // 3. College & Admin combined registration (or admin registering for an existing college)
-router.post('/admin/register', async (req, res) => {
+router.post('/admin/register', upload.single('idCard'), async (req, res) => {
   try {
     const {
-      collegeMode, // 'create' or 'existing'
-      collegeId, // if existing
-      collegeName, collegeCode, collegeWebsite, // if create
-      name, email, password
+      collegeId,
+      name, email, password,
+      phone, full_name_aadhar, position, department
     } = req.body;
 
     if (!name || !email || !password) {
@@ -72,6 +76,43 @@ router.post('/admin/register', async (req, res) => {
 
     if (existingAdmin) {
       return res.status(400).json({ error: 'An administrator account with this email already exists' });
+    }
+
+    let idCardUrl = '';
+    if (req.file) {
+      try {
+        const mime = req.file.mimetype.toLowerCase();
+        let cloudinaryResourceType = 'raw';
+        if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
+
+        const tryCloudinaryUpload = async (resourceType) => {
+          const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+          const formData = new FormData();
+          formData.append('file', blob, req.file.originalname);
+          formData.append('upload_preset', 'myvault_unsigned');
+
+          const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
+            method: 'POST',
+            body: formData
+          });
+          const data = await uploadRes.json();
+          if (data.secure_url) return data.secure_url;
+          throw new Error(data.error?.message || JSON.stringify(data));
+        };
+
+        try {
+          idCardUrl = await tryCloudinaryUpload(cloudinaryResourceType);
+        } catch (firstErr) {
+          if (cloudinaryResourceType !== 'raw') {
+            idCardUrl = await tryCloudinaryUpload('raw');
+          } else {
+            throw firstErr;
+          }
+        }
+      } catch (uploadErr) {
+        console.error('Admin ID upload failed:', uploadErr.message);
+        return res.status(500).json({ error: 'ID card upload failed.', message: uploadErr.message });
+      }
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
@@ -99,41 +140,43 @@ router.post('/admin/register', async (req, res) => {
 
       // Create Admin record in Supabase (students table with an admin role)
       await run(
-        `INSERT INTO students (id, first_name, last_name, full_name_aadhar, mobile, email, password_hash, hall_ticket, university_id, college_id, course, branch, role, is_mobile_verified, is_email_verified, verification_status, is_verified)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO students (id, first_name, last_name, full_name_aadhar, mobile, email, password_hash, hall_ticket, university_id, college_id, course, branch, role, is_mobile_verified, is_email_verified, verification_status, is_verified, id_card_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           adminId,
           firstName,
           lastName,
-          name,
-          'ADMIN_' + adminId.substring(0, 5), // dummy unique mobile
+          full_name_aadhar || name,
+          phone || '',
           email.trim().toLowerCase(),
           passwordHash,
-          'HT_' + adminId.substring(0, 5), // dummy unique hall ticket
+          'EMP-' + Math.floor(1000 + Math.random() * 9000), // Random employee ID
           universityId,
           targetCollegeId,
-          'N/A',
-          'N/A',
+          position || 'Dean',
+          department || 'CSE',
           'college_admin',
           true,
           true,
-          'Approved',
-          true
+          'Pending', // Pending verification
+          false,
+          idCardUrl
         ]
       );
     } else {
       await run(
-        'INSERT INTO admins (id, college_id, name, email, password_hash) VALUES (?, ?, ?, ?, ?)',
-        [adminId, targetCollegeId, name, email, passwordHash]
+        `INSERT INTO admins (id, college_id, name, email, password_hash, phone, full_name_aadhar, id_card_url, position, department, role, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin', 'pending')`,
+        [adminId, targetCollegeId, name, email, passwordHash, phone || '', full_name_aadhar || name, idCardUrl, position || 'Dean', department || 'CSE']
       );
     }
 
     const token = jwt.sign({ id: adminId, role: 'admin', college_id: targetCollegeId }, JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
-      message: 'Admin account registered successfully',
+      message: 'Admin account registered successfully. Pending approval.',
       token,
-      admin: { id: adminId, name, email, college_id: targetCollegeId, college_name: college?.name || '' }
+      admin: { id: adminId, name, email, college_id: targetCollegeId, college_name: college?.name || '', status: 'pending' }
     });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed', message: err.message });
@@ -151,9 +194,9 @@ router.post('/admin/login', async (req, res) => {
     let admin;
     if (process.env.DB_TYPE === 'postgres') {
       admin = await get(
-        `SELECT id, college_id, first_name || ' ' || last_name AS name, email, password_hash
+        `SELECT id, college_id, first_name || ' ' || last_name AS name, email, password_hash, verification_status
          FROM students 
-         WHERE email = ? AND role IN ('dept_admin', 'college_admin', 'super_admin')`,
+         WHERE email = ? AND role IN ('admin', 'dept_admin', 'college_admin', 'super_admin')`,
         [email.trim().toLowerCase()]
       );
     } else {
@@ -162,6 +205,12 @@ router.post('/admin/login', async (req, res) => {
 
     if (!admin) {
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Enforce approval verification check
+    const statusVal = process.env.DB_TYPE === 'postgres' ? admin.verification_status : admin.status;
+    if (statusVal && statusVal.toLowerCase() !== 'approved') {
+      return res.status(403).json({ error: 'Your administrator account is pending approval by the system admin.' });
     }
 
     const isMatch = await bcrypt.compare(password, admin.password_hash);

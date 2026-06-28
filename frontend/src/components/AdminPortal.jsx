@@ -30,6 +30,11 @@ export default function AdminPortal() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [selectedCollegeId, setSelectedCollegeId] = useState('');
+  const [phone, setPhone] = useState('');
+  const [aadharName, setAadharName] = useState('');
+  const [position, setPosition] = useState('Professor');
+  const [department, setDepartment] = useState('CSE');
+  const [idCardFile, setIdCardFile] = useState(null);
   
   // Dashboard states
   const [analytics, setAnalytics] = useState(null);
@@ -185,32 +190,50 @@ export default function AdminPortal() {
     setErrorMsg('');
     setSuccessMsg('');
 
-    const endpoint = isLogin ? '/auth/admin/login' : '/auth/admin/register';
-    const payload = isLogin 
-      ? { email, password }
-      : {
-          collegeId: selectedCollegeId,
-          name,
-          email,
-          password
-        };
-
     try {
-      const res = await fetch(`${API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      let res;
+      if (isLogin) {
+        res = await fetch(`${API_URL}/auth/admin/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+      } else {
+        if (!idCardFile) {
+          setErrorMsg('Employee ID Card file upload is required.');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('collegeId', selectedCollegeId);
+        formData.append('name', name);
+        formData.append('email', email);
+        formData.append('password', password);
+        formData.append('phone', phone);
+        formData.append('full_name_aadhar', aadharName);
+        formData.append('position', position);
+        formData.append('department', department);
+        formData.append('idCard', idCardFile);
+
+        res = await fetch(`${API_URL}/auth/admin/register`, {
+          method: 'POST',
+          body: formData
+        });
+      }
+
       const data = await res.json();
 
       if (res.ok) {
-        setToken(data.token);
-        setAdminUser(data.admin);
-        localStorage.setItem('myvault_admin_token', data.token);
-        localStorage.setItem('myvault_admin_user', JSON.stringify(data.admin));
-        setSuccessMsg('Logged in successfully!');
-        // Refresh college list just in case a new one was added
-        fetchColleges();
+        if (isLogin) {
+          setToken(data.token);
+          setAdminUser(data.admin);
+          localStorage.setItem('myvault_admin_token', data.token);
+          localStorage.setItem('myvault_admin_user', JSON.stringify(data.admin));
+          setSuccessMsg('Logged in successfully!');
+          fetchColleges();
+        } else {
+          setSuccessMsg('Employee account registered successfully! Awaiting administrator verification.');
+          setIsLogin(true); // Switch to login screen
+        }
       } else {
         setErrorMsg(data.error || 'Authentication failed');
       }
@@ -499,6 +522,72 @@ export default function AdminPortal() {
                   placeholder="Dean / Admin Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Phone Number</label>
+                <input 
+                  type="tel" 
+                  className="form-input" 
+                  placeholder="e.g. +91 9876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Full Name on Aadhaar (Aadhaar Verification)</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  placeholder="Exact name as on Aadhaar card"
+                  value={aadharName}
+                  onChange={(e) => setAadharName(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Position / Job Title</label>
+                <select 
+                  className="form-select"
+                  value={position}
+                  onChange={(e) => setPosition(e.target.value)}
+                >
+                  <option value="Dean">Dean / Principal</option>
+                  <option value="Professor">Professor / HOD</option>
+                  <option value="Placement Officer">Training & Placement Officer (TPO)</option>
+                  <option value="Assistant Professor">Assistant Professor / Faculty</option>
+                  <option value="Registrar">Registrar / Admin Staff</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Department</label>
+                <select 
+                  className="form-select"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                >
+                  <option value="CSE">Computer Science & Engineering</option>
+                  <option value="ECE">Electronics & Communication</option>
+                  <option value="IT">Information Technology</option>
+                  <option value="ME">Mechanical Engineering</option>
+                  <option value="CE">Civil Engineering</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label className="form-label">Upload Employee ID Card (Verification File)</label>
+                <input 
+                  type="file" 
+                  className="form-input" 
+                  accept="image/*,application/pdf"
+                  onChange={(e) => setIdCardFile(e.target.files[0])}
+                  required
                 />
               </div>
             </>

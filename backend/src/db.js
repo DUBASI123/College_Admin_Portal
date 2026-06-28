@@ -127,12 +127,26 @@ export const initDb = async () => {
       name TEXT NOT NULL,
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
+      phone TEXT,
+      full_name_aadhar TEXT,
+      id_card_url TEXT,
+      position TEXT,
+      department TEXT,
       role TEXT CHECK (role IN ('super_admin', 'admin')) DEFAULT 'admin',
+      status TEXT CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending',
       is_active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (college_id) REFERENCES colleges(id) ON DELETE CASCADE
     )
   `);
+
+  // Migrate existing SQLite tables to include new employee verification columns
+  try { await run("ALTER TABLE admins ADD COLUMN phone TEXT"); } catch (_) {}
+  try { await run("ALTER TABLE admins ADD COLUMN full_name_aadhar TEXT"); } catch (_) {}
+  try { await run("ALTER TABLE admins ADD COLUMN id_card_url TEXT"); } catch (_) {}
+  try { await run("ALTER TABLE admins ADD COLUMN position TEXT"); } catch (_) {}
+  try { await run("ALTER TABLE admins ADD COLUMN department TEXT"); } catch (_) {}
+  try { await run("ALTER TABLE admins ADD COLUMN status TEXT CHECK (status IN ('pending', 'approved', 'rejected')) DEFAULT 'pending'"); } catch (_) {}
 
   // Create Departments
   await run(`
