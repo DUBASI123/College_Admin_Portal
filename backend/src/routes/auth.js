@@ -58,52 +58,8 @@ router.post('/admin/register', async (req, res) => {
     }
 
     let targetCollegeId = collegeId;
-
-    // Create a new college if requested
-    if (collegeMode === 'create') {
-      if (!collegeName || !collegeCode) {
-        return res.status(400).json({ error: 'College name and code are required for new colleges' });
-      }
-
-      // Check if college code already exists
-      const existingCollege = await get('SELECT id FROM colleges WHERE code = ?', [collegeCode.toUpperCase()]);
-      if (existingCollege) {
-        return res.status(400).json({ error: 'A college with this code already exists' });
-      }
-
-      targetCollegeId = generateUUID();
-      if (process.env.DB_TYPE === 'postgres') {
-        // In the live database, university_id is required. We default to '00000000-0000-0000-0000-000000000001'
-        await run(
-          'INSERT INTO colleges (id, name, code, university_id, logo_url) VALUES (?, ?, ?, ?, ?)',
-          [targetCollegeId, collegeName, collegeCode.toUpperCase(), '00000000-0000-0000-0000-000000000001', null]
-        );
-      } else {
-        await run(
-          'INSERT INTO colleges (id, name, code, website) VALUES (?, ?, ?, ?)',
-          [targetCollegeId, collegeName, collegeCode.toUpperCase(), collegeWebsite || '']
-        );
-
-        // Seed default departments for the new college
-        const defaultDepts = [
-          { name: 'Computer Science & Engineering', code: 'CSE' },
-          { name: 'Information Technology', code: 'IT' },
-          { name: 'Electronics & Communication', code: 'ECE' },
-          { name: 'Mechanical Engineering', code: 'ME' },
-          { name: 'Civil Engineering', code: 'CE' }
-        ];
-
-        for (const dept of defaultDepts) {
-          await run(
-            'INSERT INTO departments (id, college_id, name, code) VALUES (?, ?, ?, ?)',
-            [generateUUID(), targetCollegeId, dept.name, dept.code]
-          );
-        }
-      }
-    } else {
-      if (!targetCollegeId) {
-        return res.status(400).json({ error: 'You must select a college' });
-      }
+    if (!targetCollegeId) {
+      return res.status(400).json({ error: 'You must select a college' });
     }
 
     // Check if email already registered

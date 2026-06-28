@@ -29,11 +29,7 @@ export default function AdminPortal() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [collegeMode, setCollegeMode] = useState('existing'); // 'create' or 'existing'
   const [selectedCollegeId, setSelectedCollegeId] = useState('');
-  const [newCollegeName, setNewCollegeName] = useState('');
-  const [newCollegeCode, setNewCollegeCode] = useState('');
-  const [newCollegeWebsite, setNewCollegeWebsite] = useState('');
   
   // Dashboard states
   const [analytics, setAnalytics] = useState(null);
@@ -193,11 +189,7 @@ export default function AdminPortal() {
     const payload = isLogin 
       ? { email, password }
       : {
-          collegeMode,
           collegeId: selectedCollegeId,
-          collegeName: newCollegeName,
-          collegeCode: newCollegeCode,
-          collegeWebsite: newCollegeWebsite,
           name,
           email,
           password
