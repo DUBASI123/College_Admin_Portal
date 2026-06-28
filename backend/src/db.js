@@ -259,66 +259,71 @@ export const initDb = async () => {
     console.log('Seeding initial mock data into database...');
     
     // Colleges
-    const suId = '11111111-1111-1111-1111-111111111111';
-    const mitId = '22222222-2222-2222-2222-222222222222';
-    
-    await run("INSERT INTO colleges (id, name, code, website) VALUES (?, 'Stanford University', 'SU', 'stanford.edu')", [suId]);
-    await run("INSERT INTO colleges (id, name, code, website) VALUES (?, 'MIT College', 'MIT', 'mit.edu')", [mitId]);
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_nitw', 'National Institute of Technology (NIT) Warangal', 'NITW', 'nitw.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_kitsw', 'Kakatiya Institute of Technology & Science (KITS) Warangal', 'KITSW', 'kitsw.ac.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_vcew', 'Vaagdevi College of Engineering', 'VCEW', 'vaagdevi.edu.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_sru', 'SR University', 'SRU', 'sru.edu.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_arti', \"Aurora's Research and Technological Institute\", 'ARTI', 'aurora.edu.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_tpce', 'Talla Padmavathi College of Engineering', 'TPCE', 'tallapadmavathi.org')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_sritw', 'Sumathi Reddy Institute of Technology for Women', 'SRITW', 'sritw.org')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_jits', 'Jayamukhi Institute of Technological Sciences', 'JITS', 'jits.in')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_bies', 'Balaji Institute of Engineering and Sciences', 'BIES', 'balajigroups.org')");
+    await run("INSERT INTO colleges (id, name, code, website) VALUES ('c_jits2', 'Jaya Institute of Technology & Science', 'JITS2', 'jayaits.ac.in')");
 
     // Departments
-    const suCse = 'dept-su-cse';
-    const suIt = 'dept-su-it';
-    const mitCse = 'dept-mit-cse';
+    const suCse = 'dept-nitw-cse';
+    const suIt = 'dept-nitw-it';
+    const mitCse = 'dept-kitsw-cse';
     
-    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, ?, 'Computer Science & Engineering', 'CSE')", [suCse, suId]);
-    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, ?, 'Information Technology', 'IT')", [suIt, suId]);
-    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, ?, 'Computer Science & Engineering', 'CSE')", [mitCse, mitId]);
+    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, 'c_nitw', 'Computer Science & Engineering', 'CSE')", [suCse]);
+    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, 'c_nitw', 'Information Technology', 'IT')", [suIt]);
+    await run("INSERT INTO departments (id, college_id, name, code) VALUES (?, 'c_kitsw', 'Computer Science & Engineering', 'CSE')", [mitCse]);
 
     // Admin (password is 'password123')
     const passwordHash = await bcrypt.hash('password123', 10);
     const adminId = 'admin-su-id';
     await run(
-      "INSERT INTO admins (id, college_id, name, email, password_hash, role) VALUES (?, ?, 'Dean Williams', 'admin@stanford.edu', ?, 'admin')",
-      [adminId, suId, passwordHash]
+      "INSERT INTO admins (id, college_id, name, email, password_hash, role) VALUES (?, 'c_nitw', 'Dean NITW', 'admin@nitw.ac.in', ?, 'admin')",
+      [adminId, passwordHash]
     );
 
     // Pending Student (password is 'password123')
     await run(
       `INSERT INTO students (id, college_id, department_id, name, email, phone, roll_number, year_of_study, password_hash, status)
-       VALUES (?, ?, ?, 'Alice Smith', 'student@stanford.edu', '9876543210', 'SU-CS-007', 3, ?, 'pending')`,
-      ['student-pending-id', suId, suCse, passwordHash]
+       VALUES (?, 'c_nitw', ?, 'Alice Smith', 'student@nitw.ac.in', '9876543210', 'NITW-CS-007', 3, ?, 'pending')`,
+      ['student-pending-id', suCse, passwordHash]
     );
 
     // Approved Student (password is 'password123')
     await run(
       `INSERT INTO students (id, college_id, department_id, name, email, phone, roll_number, year_of_study, password_hash, status)
-       VALUES (?, ?, ?, 'Bob Johnson', 'bob@stanford.edu', '9876543211', 'SU-CS-008', 4, ?, 'approved')`,
-      ['student-approved-id', suId, suCse, passwordHash]
+       VALUES (?, 'c_nitw', ?, 'Bob Johnson', 'bob@nitw.ac.in', '9876543211', 'NITW-CS-008', 4, ?, 'approved')`,
+      ['student-approved-id', suCse, passwordHash]
     );
 
     // Content Categories
     const notesCat = 'cat-notes';
     const booksCat = 'cat-books';
-    await run("INSERT INTO content_categories (id, college_id, name, slug, icon) VALUES (?, ?, 'Notes', 'notes', 'file-text')", [notesCat, suId]);
-    await run("INSERT INTO content_categories (id, college_id, name, slug, icon) VALUES (?, ?, 'e-Books', 'ebooks', 'book')", [booksCat, suId]);
+    await run("INSERT INTO content_categories (id, college_id, name, slug, icon) VALUES (?, 'c_nitw', 'Notes', 'notes', 'file-text')", [notesCat]);
+    await run("INSERT INTO content_categories (id, college_id, name, slug, icon) VALUES (?, 'c_nitw', 'e-Books', 'ebooks', 'book')", [booksCat]);
 
     // Academic Content
     await run(
       `INSERT INTO content (id, college_id, category_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
-       VALUES (?, ?, ?, ?, ?, 'DBMS Lecture Notes - Unit 1', 'Relational database models and standard SQL queries.', 'notes', '/uploads/dbms-notes.pdf', 1048576, 'dbms-notes.pdf', 'Database Systems', 5, 3)`,
-      ['content-dbms-notes', suId, notesCat, suCse, adminId]
+       VALUES (?, 'c_nitw', ?, ?, ?, 'DBMS Lecture Notes - Unit 1', 'Relational database models and standard SQL queries.', 'notes', '/uploads/dbms-notes.pdf', 1048576, 'dbms-notes.pdf', 'Database Systems', 5, 3)`,
+      ['content-dbms-notes', notesCat, suCse, adminId]
     );
     await run(
       `INSERT INTO content (id, college_id, category_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
-       VALUES (?, ?, ?, ?, ?, 'Data Structures Reference Book', 'Standard algorithms and tree traversals textbook references.', 'ebook', '/uploads/dsa-book.pdf', 5242880, 'dsa-book.pdf', 'Data Structures', 3, 2)`,
-      ['content-dsa-book', suId, booksCat, suCse, adminId]
+       VALUES (?, 'c_nitw', ?, ?, ?, 'Data Structures Reference Book', 'Standard algorithms and tree traversals textbook references.', 'ebook', '/uploads/dsa-book.pdf', 5242880, 'dsa-book.pdf', 'Data Structures', 3, 2)`,
+      ['content-dsa-book', booksCat, suCse, adminId]
     );
 
     // Opportunities
     await run(
       `INSERT INTO opportunities (id, college_id, posted_by, title, company, description, type, location, salary_range, eligibility, apply_link, deadline)
-       VALUES (?, ?, ?, 'Associate Software Engineer', 'Google India', 'Campus placement drive for software engineers. Responsibilities include coding, testing, and debugging large scale systems.', 'job', 'Bangalore', '18 - 22 LPA', 'CGPA > 8.0, CSE/IT students only', 'https://careers.google.com', '2026-07-31')`,
-      ['opp-google-id', suId, adminId]
+       VALUES (?, 'c_nitw', ?, 'Associate Software Engineer', 'Google India', 'Campus placement drive for software engineers. Responsibilities include coding, testing, and debugging large scale systems.', 'job', 'Bangalore', '18 - 22 LPA', 'CGPA > 8.0, CSE/IT students only', 'https://careers.google.com', '2026-07-31')`,
+      ['opp-google-id', adminId]
     );
 
     console.log('Database seeded successfully.');
