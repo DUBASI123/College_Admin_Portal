@@ -43,9 +43,9 @@ app.use('/api/student', studentRouter);
 // Serve uploaded files statically
 app.use('/uploads', express.static(uploadsDir));
 
-// APK direct download route (redirect to Supabase CDN for instant and fast download)
+// APK direct download route (redirect to MyVault backend for universal APK download)
 app.get('/download/apk', (req, res) => {
-  res.redirect('https://oawomrlsitttrbulxgyk.supabase.co/storage/v1/object/public/academic-files/MyVault-release.apk');
+  res.redirect('https://myvault-jbd7.onrender.com/download-apk');
 });
 
 // General file download proxy (useful to force browser downloads for Cloudinary raw resources)
