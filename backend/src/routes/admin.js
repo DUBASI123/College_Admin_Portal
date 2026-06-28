@@ -391,7 +391,9 @@ router.get('/opportunities', async (req, res) => {
         `SELECT id, company, role AS title, type, domain AS description, stipend AS salary_range, 
                 duration, deadline, apply_link, status, created_at, 1 AS is_active, college_id
          FROM internships
-         ORDER BY created_at DESC`
+         WHERE college_id = ?
+         ORDER BY created_at DESC`,
+        [collegeId]
       );
     } else {
       opps = await query(
@@ -419,11 +421,11 @@ router.post('/opportunities', async (req, res) => {
 
     if (process.env.DB_TYPE === 'postgres') {
       await run(
-        `INSERT INTO internships (id, company, role, type, domain, stipend, duration, deadline, apply_link, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open')`,
+        `INSERT INTO internships (id, company, role, type, domain, stipend, duration, deadline, apply_link, status, college_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?)`,
         [
           oppId, company, title, type || 'internship', description || '', 
-          salaryRange || '', deadline || '', deadline || '', applyLink || ''
+          salaryRange || '', deadline || '', deadline || '', applyLink || '', collegeId
         ]
       );
     } else {
@@ -450,7 +452,7 @@ router.delete('/opportunities/:id', async (req, res) => {
     const collegeId = req.admin.college_id;
 
     if (process.env.DB_TYPE === 'postgres') {
-      const opp = await get('SELECT id FROM internships WHERE id = ?', [id]);
+      const opp = await get('SELECT id FROM internships WHERE id = ? AND college_id = ?', [id, collegeId]);
       if (!opp) {
         return res.status(404).json({ error: 'Opportunity not found' });
       }
@@ -482,9 +484,11 @@ router.get('/notifications', async (req, res) => {
     if (process.env.DB_TYPE === 'postgres') {
       notes = await query(
         `SELECT id, title, body, type, created_at AS sent_at, 
-                NULL AS department_name, NULL AS department_code
+                NULL AS department_name, NULL AS department_code, college_id
          FROM notifications
-         ORDER BY created_at DESC`
+         WHERE college_id = ?
+         ORDER BY created_at DESC`,
+        [collegeId]
       );
     } else {
       notes = await query(
@@ -516,9 +520,9 @@ router.post('/notifications', async (req, res) => {
 
     if (process.env.DB_TYPE === 'postgres') {
       await run(
-        `INSERT INTO notifications (id, title, body, type)
-         VALUES (?, ?, ?, ?)`,
-        [noteId, title, body, type || 'general']
+        `INSERT INTO notifications (id, title, body, type, college_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [noteId, title, body, type || 'general', collegeId]
       );
     } else {
       await run(
@@ -550,8 +554,16 @@ router.get('/analytics', async (req, res) => {
       totalStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student'", [collegeId]);
       pendingStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student' AND verification_status = 'Pending'", [collegeId]);
       approvedStudents = await get("SELECT COUNT(*)::int as count FROM students WHERE college_id = ? AND role = 'student' AND verification_status = 'Approved'", [collegeId]);
-      totalContent = await get("SELECT COUNT(*)::int as count FROM academic_contents");
-      totalOpps = await get("SELECT COUNT(*)::int as count FROM internships WHERE status = 'Open'");
+      
+      totalContent = await get(
+        `SELECT COUNT(c.id)::int as count 
+         FROM academic_contents c
+         JOIN students u ON c.uploaded_by = u.id
+         WHERE u.college_id = ?`,
+        [collegeId]
+      );
+      
+      totalOpps = await get("SELECT COUNT(*)::int as count FROM internships WHERE status = 'Open' AND college_id = ?", [collegeId]);
 
       deptBreakdown = await query(
         `SELECT branch AS department_name, branch AS department_code, COUNT(id)::int as student_count
