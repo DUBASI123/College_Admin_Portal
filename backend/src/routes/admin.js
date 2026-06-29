@@ -1,6 +1,7 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
+import https from 'https';
 import { run, query, get, generateUUID } from '../db.js';
 
 const router = express.Router();
@@ -94,6 +95,110 @@ router.get('/students', async (req, res) => {
   }
 });
 
+// Helper to send registration approval email via SendGrid REST API
+function sendApprovalEmail(email, name) {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const fromEmail = process.env.SENDGRID_FROM_EMAIL || "dubasisruthishiva1335@gmail.com";
+  if (!apiKey) {
+    console.warn("SENDGRID_API_KEY environment variable is not set. Skipping approval email.");
+    return;
+  }
+  
+  const postData = JSON.stringify({
+    personalizations: [
+      { to: [{ email: email }] }
+    ],
+    from: { email: fromEmail, name: "MyVault Support" },
+    subject: "MyVault Student Account Approved!",
+    content: [
+      {
+        type: "text/plain",
+        value: `Hello ${name},\n\nCongratulations! Your student registration request for MyVault has been approved by the college administration.\n\nYou can now log in using your registered credentials in the MyVault app.\n\nBest regards,\nCollege Administration`
+      }
+    ]
+  });
+
+  const options = {
+    hostname: 'api.sendgrid.com',
+    path: '/v3/mail/send',
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  };
+
+  const req = https.request(options, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        console.log(`Approval email sent successfully to ${email}`);
+      } else {
+        console.warn(`SendGrid email failed with status ${res.statusCode}:`, data);
+      }
+    });
+  });
+
+  req.on('error', (err) => {
+    console.error("Failed to send approval email:", err.message);
+  });
+
+  req.write(postData);
+  req.end();
+}
+
+// Helper to send registration approval SMS via Twilio REST API
+function sendApprovalSms(mobile, name) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromPhone = process.env.TWILIO_PHONE_NUMBER || "+14472473225";
+  if (!mobile) return;
+  if (!accountSid || !authToken) {
+    console.warn("TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN is not set. Skipping approval SMS.");
+    return;
+  }
+
+  const postData = new URLSearchParams({
+    From: fromPhone,
+    To: mobile,
+    Body: `Hello ${name}, your MyVault student account has been approved by the college administration! You can now log in.`
+  }).toString();
+
+  const authString = Buffer.from(`${accountSid}:${authToken}`).toString('base64');
+
+  const options = {
+    hostname: 'api.twilio.com',
+    path: `/2010-04-01/Accounts/${accountSid}/Messages.json`,
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${authString}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  };
+
+  const req = https.request(options, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        console.log(`Approval SMS sent successfully to ${mobile}`);
+      } else {
+        console.warn(`Twilio SMS failed with status ${res.statusCode}:`, data);
+      }
+    });
+  });
+
+  req.on('error', (err) => {
+    console.error("Failed to send approval SMS:", err.message);
+  });
+
+  req.write(postData);
+  req.end();
+}
+
 // Approve a student
 router.post('/students/:id/approve', async (req, res) => {
   try {
@@ -101,7 +206,27 @@ router.post('/students/:id/approve', async (req, res) => {
     const collegeId = req.admin.college_id;
 
     // Verify student belongs to this admin's college
-    const student = await get('SELECT id FROM students WHERE id = ? AND college_id = ?', [id, collegeId]);
+    let student;
+    if (process.env.DB_TYPE === 'postgres') {
+      student = await get(
+        `SELECT id, first_name, last_name, email, mobile 
+         FROM students 
+         WHERE id = ? AND college_id = ?`,
+        [id, collegeId]
+      );
+      if (student) {
+        student.name = `${student.first_name} ${student.last_name}`;
+        student.phone = student.mobile;
+      }
+    } else {
+      student = await get(
+        `SELECT id, name, email, phone 
+         FROM students 
+         WHERE id = ? AND college_id = ?`,
+        [id, collegeId]
+      );
+    }
+
     if (!student) {
       return res.status(404).json({ error: 'Student not found in this college' });
     }
@@ -131,6 +256,15 @@ router.post('/students/:id/approve', async (req, res) => {
          WHERE id = ?`,
         [req.admin.id, id]
       );
+    }
+
+    // Trigger asynchronous notifications (non-blocking)
+    if (student.email) {
+      sendApprovalEmail(student.email, student.name || 'Student');
+    }
+    const phoneNum = student.phone || student.mobile;
+    if (phoneNum) {
+      sendApprovalSms(phoneNum, student.name || 'Student');
     }
 
     res.json({ message: 'Student registration approved successfully' });
