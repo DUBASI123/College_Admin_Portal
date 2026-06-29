@@ -54,6 +54,7 @@ export default function AdminPortal() {
   const [uploadSemester, setUploadSemester] = useState('1');
   const [uploadYear, setUploadYear] = useState('1');
   const [uploadFile, setUploadFile] = useState(null);
+  const [uploadFileUrl, setUploadFileUrl] = useState('');
   
   // Opportunity post state
   const [oppTitle, setOppTitle] = useState('');
@@ -316,6 +317,7 @@ export default function AdminPortal() {
     formData.append('subject', uploadSubject);
     formData.append('semester', uploadSemester);
     formData.append('yearTarget', uploadYear);
+    formData.append('fileUrl', uploadFileUrl);
     if (uploadFile) {
       formData.append('file', uploadFile);
     }
@@ -332,6 +334,7 @@ export default function AdminPortal() {
         setUploadDesc('');
         setUploadSubject('');
         setUploadFile(null);
+        setUploadFileUrl('');
         fetchContent();
         fetchAnalytics();
       } else {
@@ -950,11 +953,28 @@ export default function AdminPortal() {
                   </div>
 
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <label className="form-label">Choose Document File (PDF, PPT, DOC) or enter Link URL</label>
+                    <label className="form-label">Choose Document File (PDF, PPT, DOC)</label>
                     <input 
                       type="file" 
-                      onChange={(e) => setUploadFile(e.target.files[0])}
+                      onChange={(e) => {
+                        setUploadFile(e.target.files[0]);
+                        if (e.target.files[0]) setUploadFileUrl('');
+                      }}
                       style={{ padding: '0.4rem 0', display: 'block' }}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <label className="form-label">OR enter Link URL (Google Drive, YouTube, etc.)</label>
+                    <input 
+                      type="url" 
+                      className="form-input"
+                      placeholder="https://example.com/document.pdf or video link"
+                      value={uploadFileUrl}
+                      onChange={(e) => {
+                        setUploadFileUrl(e.target.value);
+                        if (e.target.value) setUploadFile(null);
+                      }}
                     />
                   </div>
 
