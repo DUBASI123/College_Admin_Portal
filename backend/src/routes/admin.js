@@ -393,9 +393,9 @@ router.post('/content', upload.single('file'), async (req, res) => {
           const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json'
+              'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: JSON.stringify({
+            body: new URLSearchParams({
               file: dataUri,
               upload_preset: 'myvault_unsigned',
               type: 'upload'
