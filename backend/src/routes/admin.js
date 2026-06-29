@@ -332,16 +332,12 @@ router.get('/content', async (req, res) => {
 
     if (process.env.DB_TYPE === 'postgres') {
       contentList = await query(
-        `SELECT c.id, c.title, c.description, c.content_type, c.file_url, c.created_at,
+        `SELECT r.id, r.title, r.description, r.resource_type AS content_type, r.file_url, r.created_at,
                 s.name AS subject, s.semester, s.branch AS department_name, s.branch AS department_code,
-                COALESCE(u.first_name || ' ' || u.last_name, a.email, 'Admin') AS admin_name
-         FROM academic_contents c
-         LEFT JOIN subjects s ON c.subject_id = s.id
-         LEFT JOIN students u ON c.uploaded_by = u.id
-         LEFT JOIN admins a ON c.uploaded_by = a.id
-         WHERE s.id IS NOT NULL AND (u.college_id = ? OR a.college_id = ?)
-         ORDER BY c.created_at DESC`,
-        [collegeId, collegeId]
+                'Admin' AS admin_name
+         FROM academic_resources r
+         LEFT JOIN subjects s ON r.subject_id = s.id
+         ORDER BY r.created_at DESC`
       );
     } else {
       const sql = `
@@ -451,9 +447,9 @@ router.post('/content', upload.single('file'), async (req, res) => {
       }
 
       await run(
-        `INSERT INTO academic_contents (id, subject_id, title, content_type, description, file_url, uploaded_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [contentId, subjectRow.id, title, contentType, description || '', fileUrl, req.admin.id]
+        `INSERT INTO academic_resources (id, subject_id, title, resource_type, description, file_url)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [contentId, subjectRow.id, title, contentType, description || '', fileUrl]
       );
     } else {
       await run(
@@ -479,19 +475,12 @@ router.delete('/content/:id', async (req, res) => {
     const collegeId = req.admin.college_id;
 
     if (process.env.DB_TYPE === 'postgres') {
-      const contentItem = await get('SELECT file_url FROM academic_contents WHERE id = ?', [id]);
+      const contentItem = await get('SELECT file_url FROM academic_resources WHERE id = ?', [id]);
       if (!contentItem) {
         return res.status(404).json({ error: 'Content not found' });
       }
 
-      if (contentItem.file_url && contentItem.file_url.startsWith('/uploads/')) {
-        const filePath = join(__dirname, '../../', contentItem.file_url);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-
-      await run('DELETE FROM academic_contents WHERE id = ?', [id]);
+      await run('DELETE FROM academic_resources WHERE id = ?', [id]);
     } else {
       // Verify ownership
       const contentItem = await get('SELECT file_url FROM content WHERE id = ? AND college_id = ?', [id, collegeId]);
@@ -528,12 +517,10 @@ router.get('/opportunities', async (req, res) => {
 
     if (process.env.DB_TYPE === 'postgres') {
       opps = await query(
-        `SELECT id, company, role AS title, type, domain AS description, stipend AS salary_range, 
-                duration, deadline, apply_link, status, created_at, 1 AS is_active, college_id
+        `SELECT id, company_name AS company, title AS role, title, sector AS type, domain AS description, stipend AS salary_range, 
+                duration, deadline, apply_url AS apply_link, location, eligibility, is_active
          FROM internships
-         WHERE college_id = ?
-         ORDER BY created_at DESC`,
-        [collegeId]
+         ORDER BY created_at DESC`
       );
     } else {
       opps = await query(
@@ -560,12 +547,22 @@ router.post('/opportunities', async (req, res) => {
     const oppId = generateUUID();
 
     if (process.env.DB_TYPE === 'postgres') {
+      let formattedDeadline = null;
+      if (deadline && deadline.trim() !== '') {
+        const parts = deadline.trim().split('-');
+        if (parts.length === 3 && parts[0].length === 2 && parts[2].length === 4) {
+          formattedDeadline = `${parts[2]}-${parts[1]}-${parts[0]}`;
+        } else {
+          formattedDeadline = deadline;
+        }
+      }
+
       await run(
-        `INSERT INTO internships (id, company, role, type, domain, stipend, duration, deadline, apply_link, status, college_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?)`,
+        `INSERT INTO internships (id, company_name, title, sector, domain, stipend, apply_url, deadline, location, eligibility, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
         [
           oppId, company, title, type || 'internship', description || '', 
-          salaryRange || '', deadline || '', deadline || '', applyLink || '', collegeId
+          salaryRange || '', applyLink || '', formattedDeadline, location || '', eligibility || ''
         ]
       );
     } else {
@@ -592,7 +589,7 @@ router.delete('/opportunities/:id', async (req, res) => {
     const collegeId = req.admin.college_id;
 
     if (process.env.DB_TYPE === 'postgres') {
-      const opp = await get('SELECT id FROM internships WHERE id = ? AND college_id = ?', [id, collegeId]);
+      const opp = await get('SELECT id FROM internships WHERE id = ?', [id]);
       if (!opp) {
         return res.status(404).json({ error: 'Opportunity not found' });
       }
