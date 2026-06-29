@@ -387,14 +387,19 @@ router.post('/content', upload.single('file'), async (req, res) => {
         // Helper to try a Cloudinary upload with given resource type
         // Uses multipart FormData (much more reliable than base64 for documents)
         const tryCloudinaryUpload = async (resourceType) => {
-          const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
-          const formData = new FormData();
-          formData.append('file', blob, req.file.originalname);
-          formData.append('upload_preset', 'myvault_unsigned');
+          const base64Data = req.file.buffer.toString('base64');
+          const dataUri = `data:${req.file.mimetype};base64,${base64Data}`;
 
           const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
-            body: formData
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              file: dataUri,
+              upload_preset: 'myvault_unsigned',
+              type: 'upload'
+            })
           });
           const data = await uploadRes.json();
           console.log(`Cloudinary response [${resourceType}]:`, JSON.stringify(data).substring(0, 500));
