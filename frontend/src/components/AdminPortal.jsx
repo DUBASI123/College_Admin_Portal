@@ -339,10 +339,10 @@ export default function AdminPortal() {
         fetchAnalytics();
       } else {
         const data = await res.json();
-        setErrorMsg(data.error || 'Failed to upload content');
+        setErrorMsg(data.message || data.error || 'Failed to upload content');
       }
     } catch (err) {
-      setErrorMsg('Failed to connect to server.');
+      setErrorMsg(`Failed to connect to server: ${err.message}`);
     }
   };
 
@@ -413,10 +413,10 @@ export default function AdminPortal() {
         fetchAnalytics();
       } else {
         const data = await res.json();
-        setErrorMsg(data.error || 'Failed to post opportunity');
+        setErrorMsg(data.message || data.error || 'Failed to post opportunity');
       }
     } catch (err) {
-      setErrorMsg('Network error.');
+      setErrorMsg(`Network error: ${err.message}`);
     }
   };
 
