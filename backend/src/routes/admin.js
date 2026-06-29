@@ -334,13 +334,14 @@ router.get('/content', async (req, res) => {
       contentList = await query(
         `SELECT c.id, c.title, c.description, c.content_type, c.file_url, c.created_at,
                 s.name AS subject, s.semester, s.branch AS department_name, s.branch AS department_code,
-                u.first_name || ' ' || u.last_name AS admin_name
+                COALESCE(u.first_name || ' ' || u.last_name, a.email, 'Admin') AS admin_name
          FROM academic_contents c
          LEFT JOIN subjects s ON c.subject_id = s.id
          LEFT JOIN students u ON c.uploaded_by = u.id
-         WHERE s.id IS NOT NULL AND u.college_id = ?
+         LEFT JOIN admins a ON c.uploaded_by = a.id
+         WHERE s.id IS NOT NULL AND (u.college_id = ? OR a.college_id = ?)
          ORDER BY c.created_at DESC`,
-        [collegeId]
+        [collegeId, collegeId]
       );
     } else {
       const sql = `
