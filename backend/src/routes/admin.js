@@ -434,14 +434,14 @@ router.post('/content', upload.single('file'), async (req, res) => {
 
       let subjectRow = await get(
         'SELECT id FROM subjects WHERE name = ? AND branch = ? AND semester = ?',
-        [subject || 'General', branchName, semNumber]
+        [subject || 'General', branchName, semNumber.toString()]
       );
 
       if (!subjectRow) {
         const newSubjectId = generateUUID();
         await run(
           'INSERT INTO subjects (id, name, branch, semester) VALUES (?, ?, ?, ?)',
-          [newSubjectId, subject || 'General', branchName, semNumber]
+          [newSubjectId, subject || 'General', branchName, semNumber.toString()]
         );
         subjectRow = { id: newSubjectId };
       }
@@ -558,11 +558,11 @@ router.post('/opportunities', async (req, res) => {
       }
 
       await run(
-        `INSERT INTO internships (id, company_name, title, sector, domain, stipend, apply_url, deadline, location, eligibility, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+        `INSERT INTO internships (id, company_name, title, sector, domain, stipend, apply_url, deadline, location, eligibility, description, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
         [
           oppId, company, title, type || 'internship', description || '', 
-          salaryRange || '', applyLink || '', formattedDeadline, location || '', eligibility || ''
+          salaryRange || '', applyLink || '', formattedDeadline, location || '', eligibility || '', description || ''
         ]
       );
     } else {
