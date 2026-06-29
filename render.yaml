@@ -35,7 +35,7 @@ services:
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
-        value: https://college-admin-backend.onrender.com/api
+        value: https://college-admin-portal-zdet.onrender.com/api
     routes:
       - type: rewrite
         source: /*
