@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
+import FormData from 'form-data';
 import { get, run, query, generateUUID } from '../db.js';
 
 const router = express.Router();
@@ -86,13 +87,16 @@ router.post('/admin/register', upload.single('idCard'), async (req, res) => {
         if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
 
         const tryCloudinaryUpload = async (resourceType) => {
-          const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
           const formData = new FormData();
-          formData.append('file', blob, req.file.originalname);
+          formData.append('file', req.file.buffer, {
+            filename: req.file.originalname,
+            contentType: req.file.mimetype
+          });
           formData.append('upload_preset', 'myvault_unsigned');
 
           const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
+            headers: formData.getHeaders(),
             body: formData
           });
           const data = await uploadRes.json();

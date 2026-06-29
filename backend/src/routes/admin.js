@@ -2,6 +2,7 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import https from 'https';
+import FormData from 'form-data';
 import { run, query, get, generateUUID } from '../db.js';
 
 const router = express.Router();
@@ -383,19 +384,18 @@ router.post('/content', upload.single('file'), async (req, res) => {
         // Helper to try a Cloudinary upload with given resource type
         // Uses multipart FormData (much more reliable than base64 for documents)
         const tryCloudinaryUpload = async (resourceType) => {
-          const base64Data = req.file.buffer.toString('base64');
-          const dataUri = `data:${req.file.mimetype};base64,${base64Data}`;
+          const formData = new FormData();
+          formData.append('file', req.file.buffer, {
+            filename: req.file.originalname,
+            contentType: req.file.mimetype
+          });
+          formData.append('upload_preset', 'myvault_unsigned');
+          formData.append('type', 'upload');
 
           const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: new URLSearchParams({
-              file: dataUri,
-              upload_preset: 'myvault_unsigned',
-              type: 'upload'
-            })
+            headers: formData.getHeaders(),
+            body: formData
           });
           const data = await uploadRes.json();
           console.log(`Cloudinary response [${resourceType}]:`, JSON.stringify(data).substring(0, 500));
