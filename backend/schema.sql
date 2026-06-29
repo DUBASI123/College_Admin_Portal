@@ -145,25 +145,34 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ============================================================
 -- AUTO-SEEDING DEFAULT TEST DATA FOR POSTGRESQL DB
 -- ============================================================
-INSERT INTO colleges (id, name, code, website)
-VALUES ('11111111-1111-1111-1111-111111111111', 'Stanford University', 'SU', 'stanford.edu')
+INSERT INTO colleges (id, name, code, website) VALUES
+  ('c_nitw', 'NIT Warangal', 'NITW', 'nitw.ac.in'),
+  ('c_kitsw', 'KITS Warangal', 'KITSW', 'kitsw.ac.in'),
+  ('c_vcew', 'Vaagdevi College of Engineering', 'VCEW', 'vaagdevi.edu.in'),
+  ('c_sru', 'SR University', 'SRU', 'sru.edu.in'),
+  ('c_svs', 'SVS Group of Institutions', 'SVS', 'svs.edu.in'),
+  ('c_tpce', 'Talla Padmavathi College of Engineering', 'TPCE', 'tallapadmavathi.org'),
+  ('c_cits', 'Chaitanya Institute of Technology and Science', 'CITS', 'cits.in'),
+  ('c_arti', 'Ramappa Engineering College (Aurora''s Research and Technological Institute)', 'ARTI', 'aurora.edu.in'),
+  ('c_bits', 'Balaji Institute of Technology & Science (BITS)', 'BITS', 'bitswgl.ac.in'),
+  ('c_wits', 'Warangal Institute of Technology and Science', 'WITS', 'wits.ac.in')
 ON CONFLICT (code) DO NOTHING;
 
 INSERT INTO departments (id, college_id, name, code)
-VALUES ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', 'Computer Science & Engineering', 'CSE')
+VALUES ('dept-nitw-cse', 'c_nitw', 'Computer Science & Engineering', 'CSE')
 ON CONFLICT DO NOTHING;
 
--- Admin user (password: 'password123', email: 'admin@stanford.edu')
+-- Admin user (password: 'password123', email: 'admin@nitw.ac.in')
 -- Hash: $2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC
 INSERT INTO admins (id, college_id, name, email, password_hash, role)
-VALUES ('77777777-7777-7777-7777-777777777777', '11111111-1111-1111-1111-111111111111', 'Dean Williams', 'admin@stanford.edu', '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'admin')
+VALUES ('admin-su-id', 'c_nitw', 'Dean NITW', 'admin@nitw.ac.in', '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'admin')
 ON CONFLICT (email) DO NOTHING;
 
 -- Students (password: 'password123')
 INSERT INTO students (id, college_id, department_id, name, email, roll_number, year_of_study, password_hash, status)
-VALUES ('88888888-8888-8888-8888-888888888888', '11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'Bob Johnson', 'bob@stanford.edu', 'SU-CS-008', 4, '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'approved')
+VALUES ('student-approved-id', 'c_nitw', 'dept-nitw-cse', 'Bob Johnson', 'bob@nitw.ac.in', 'NITW-CS-008', 4, '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'approved')
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO students (id, college_id, department_id, name, email, roll_number, year_of_study, password_hash, status)
-VALUES ('99999999-9999-9999-9999-999999999999', '11111111-1111-1111-1111-111111111111', '55555555-5555-5555-5555-555555555555', 'Alice Smith', 'student@stanford.edu', 'SU-CS-007', 3, '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'pending')
+VALUES ('student-pending-id', 'c_nitw', 'dept-nitw-cse', 'Alice Smith', 'student@nitw.ac.in', 'NITW-CS-007', 3, '$2a$10$w6g2yTkyL2Z.80U/XG9Dhe6b2Fv1yD/FpB9p7J52q5W5c9xZfK3vC', 'pending')
 ON CONFLICT (email) DO NOTHING;
