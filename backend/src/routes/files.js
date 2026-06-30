@@ -8,6 +8,21 @@ import jwt from 'jsonwebtoken';
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'myvault_jwt_secret_key_12345';
 
+// Public proxy route for S3 downloads (no auth required)
+router.get('/public/files/*', async (req, res) => {
+  try {
+    const key = req.params[0];
+    if (!key) {
+      return res.status(400).json({ error: 'File key is required' });
+    }
+    const downloadUrl = await getPresignedDownloadUrl(key);
+    res.redirect(downloadUrl);
+  } catch (error) {
+    console.error('[Public Proxy Error]', error);
+    res.status(500).send('Failed to retrieve file from S3');
+  }
+});
+
 // Auth Middlewares
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;

@@ -357,69 +357,18 @@ router.get('/content', async (req, res) => {
   }
 });
 
-// Upload new content
-router.post('/content', upload.single('file'), async (req, res) => {
+// Upload new content (JSON metadata registration only, no Multer file uploads)
+router.post('/content', async (req, res) => {
   try {
     const collegeId = req.admin.college_id;
-    const { title, description, contentType, departmentId, subject, semester, yearTarget } = req.body;
+    const { title, description, contentType, departmentId, subject, semester, yearTarget, fileUrl, fileSize, fileName } = req.body;
 
     if (!title || !contentType) {
       return res.status(400).json({ error: 'Title and content type are required' });
     }
 
-    let fileUrl = '';
-    let fileName = '';
-    let fileSize = 0;
-
-    if (req.file) {
-      fileName = req.file.originalname;
-      fileSize = req.file.size;
-      try {
-        // Detect Cloudinary resource type based on MIME type
-        const mime = req.file.mimetype.toLowerCase();
-        let cloudinaryResourceType = 'raw'; // default for docs, PDFs, DOCX, PPT
-        if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
-        else if (mime.startsWith('video/')) cloudinaryResourceType = 'video';
-
-        // Helper to try a Cloudinary upload with given resource type
-        // Uses multipart FormData (much more reliable than base64 for documents)
-        const tryCloudinaryUpload = async (resourceType) => {
-          const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-          const bodyParams = new URLSearchParams();
-          bodyParams.append('file', base64File);
-          bodyParams.append('upload_preset', 'myvault_unsigned');
-          bodyParams.append('public_id', `academic_resource_${Date.now()}`);
-
-          const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
-            method: 'POST',
-            body: bodyParams
-          });
-          const data = await uploadRes.json();
-          console.log(`Cloudinary response [${resourceType}]:`, JSON.stringify(data).substring(0, 500));
-          if (data.secure_url) return data.secure_url;
-          throw new Error(data.error?.message || JSON.stringify(data));
-        };
-
-        console.log(`Uploading ${fileName} (${mime}) to Cloudinary as [${cloudinaryResourceType}]...`);
-        try {
-          fileUrl = await tryCloudinaryUpload(cloudinaryResourceType);
-        } catch (firstErr) {
-          // Fallback: if specific type fails, try 'raw' (works for any file type)
-          console.warn(`Primary upload failed (${firstErr.message}), retrying as raw...`);
-          if (cloudinaryResourceType !== 'raw') {
-            fileUrl = await tryCloudinaryUpload('raw');
-          } else {
-            throw firstErr;
-          }
-        }
-
-        console.log('Successfully uploaded to Cloudinary:', fileUrl);
-      } catch (uploadErr) {
-        console.error('Cloudinary upload failed:', uploadErr.message);
-        return res.status(500).json({ error: 'File upload failed. Please try again.', message: uploadErr.message });
-      }
-    } else {
-      fileUrl = req.body.fileUrl || '';
+    if (!fileUrl) {
+      return res.status(400).json({ error: 'File URL is required' });
     }
 
     const contentId = generateUUID();
@@ -454,7 +403,7 @@ router.post('/content', upload.single('file'), async (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           contentId, collegeId, departmentId || null, req.admin.id, title, description || '',
-          contentType, fileUrl, fileSize, fileName, subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
+          contentType, fileUrl, fileSize || 0, fileName || '', subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
         ]
       );
     }

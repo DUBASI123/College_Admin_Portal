@@ -55,6 +55,8 @@ export default function AdminPortal() {
   const [uploadYear, setUploadYear] = useState('1');
   const [uploadFile, setUploadFile] = useState(null);
   const [uploadFileUrl, setUploadFileUrl] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   
   // Opportunity post state
   const [oppTitle, setOppTitle] = useState('');
@@ -309,27 +311,227 @@ export default function AdminPortal() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append('title', uploadTitle);
-    formData.append('description', uploadDesc);
-    formData.append('contentType', uploadType);
-    formData.append('departmentId', uploadDeptId);
-    formData.append('subject', uploadSubject);
-    formData.append('semester', uploadSemester);
-    formData.append('yearTarget', uploadYear);
-    formData.append('fileUrl', uploadFileUrl);
-    if (uploadFile) {
-      formData.append('file', uploadFile);
+    if (!uploadFile && !uploadFileUrl) {
+      setErrorMsg('Please either select a document file to upload or enter a link URL.');
+      return;
     }
 
+    let finalFileUrl = uploadFileUrl;
+    let finalFileName = '';
+    let finalFileSize = 0;
+
+    // S3 direct upload if file is selected
+    if (uploadFile) {
+      setIsUploading(true);
+      setUploadProgress(0);
+
+      const fileSize = uploadFile.size;
+      const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB chunk size
+
+      try {
+        let s3Key = '';
+
+        if (fileSize < CHUNK_SIZE) {
+          // A. Single pre-signed PUT upload for small files
+          const urlRes = await fetch(`${API_URL}/files/upload-url`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              fileName: uploadFile.name,
+              fileType: uploadFile.type || 'application/octet-stream',
+              category: 'study-materials'
+            })
+          });
+
+          const urlData = await urlRes.json();
+          if (!urlRes.ok) throw new Error(urlData.error || 'Failed to get S3 upload URL');
+          s3Key = urlData.s3Key;
+
+          // Perform S3 PUT request
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', urlData.uploadUrl);
+            xhr.setRequestHeader('Content-Type', uploadFile.type || 'application/octet-stream');
+
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                setUploadProgress(Math.round((event.loaded * 100) / event.total));
+              }
+            };
+
+            xhr.onload = () => {
+              if (xhr.status === 200) resolve();
+              else reject(new Error(`S3 responded with status: ${xhr.status}`));
+            };
+            xhr.onerror = () => reject(new Error('Network error during S3 upload'));
+            xhr.send(uploadFile);
+          });
+
+          // Confirm the file metadata on S3 file manager router as well
+          await fetch(`${API_URL}/files/confirm`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              title: uploadTitle,
+              description: uploadDesc,
+              category: 'study-materials',
+              subject: uploadSubject || 'General',
+              semester: uploadSemester,
+              department: uploadDeptId || 'CSE',
+              originalFileName: uploadFile.name,
+              storedFileName: urlData.storedFileName,
+              fileSize,
+              mimeType: uploadFile.type || 'application/octet-stream',
+              s3Key
+            })
+          });
+
+        } else {
+          // B. S3 Multipart Upload for files >= 5MB
+          const initRes = await fetch(`${API_URL}/files/multipart/initiate`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              fileName: uploadFile.name,
+              fileType: uploadFile.type || 'application/octet-stream',
+              category: 'study-materials'
+            })
+          });
+
+          const initData = await initRes.json();
+          if (!initRes.ok) throw new Error(initData.error || 'Failed to initiate multipart upload');
+          const { uploadId, storedFileName } = initData;
+          s3Key = initData.s3Key;
+
+          const totalParts = Math.ceil(fileSize / CHUNK_SIZE);
+          const uploadedParts = [];
+          let totalBytesUploaded = 0;
+
+          for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+            const start = (partNumber - 1) * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, fileSize);
+            const chunk = uploadFile.slice(start, end);
+            const chunkLength = end - start;
+
+            const partUrlRes = await fetch(`${API_URL}/files/multipart/presign-part`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({ s3Key, uploadId, partNumber })
+            });
+
+            const partUrlData = await partUrlRes.json();
+            if (!partUrlRes.ok) throw new Error(partUrlData.error || `Failed to sign part ${partNumber}`);
+
+            const partETag = await new Promise((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open('PUT', partUrlData.uploadUrl);
+              xhr.setRequestHeader('Content-Type', uploadFile.type || 'application/octet-stream');
+
+              xhr.upload.onprogress = (event) => {
+                if (event.lengthComputable) {
+                  const partLoaded = event.loaded;
+                  const overallProgress = Math.round(((totalBytesUploaded + partLoaded) * 100) / fileSize);
+                  setUploadProgress(Math.min(overallProgress, 99));
+                }
+              };
+
+              xhr.onload = () => {
+                if (xhr.status === 200) {
+                  const etag = xhr.getResponseHeader('ETag');
+                  if (etag) {
+                    totalBytesUploaded += chunkLength;
+                    resolve(etag);
+                  } else {
+                    reject(new Error(`No ETag in part response ${partNumber}`));
+                  }
+                } else {
+                  reject(new Error(`Part ${partNumber} upload status: ${xhr.status}`));
+                }
+              };
+              xhr.onerror = () => reject(new Error(`Network error on part ${partNumber}`));
+              xhr.send(chunk);
+            });
+
+            uploadedParts.push({ PartNumber: partNumber, ETag: partETag });
+          }
+
+          // Complete multipart upload
+          await fetch(`${API_URL}/files/multipart/complete`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({
+              s3Key,
+              uploadId,
+              parts: uploadedParts,
+              title: uploadTitle,
+              description: uploadDesc,
+              category: 'study-materials',
+              subject: uploadSubject || 'General',
+              semester: uploadSemester,
+              department: uploadDeptId || 'CSE',
+              originalFileName: uploadFile.name,
+              storedFileName,
+              fileSize,
+              mimeType: uploadFile.type || 'application/octet-stream'
+            })
+          });
+        }
+
+        // Set S3 public proxy URL for academic resources
+        finalFileUrl = `${API_URL}/files/public/${s3Key}`;
+        finalFileName = uploadFile.name;
+        finalFileSize = fileSize;
+
+      } catch (err) {
+        setIsUploading(false);
+        setUploadProgress(0);
+        setErrorMsg(`S3 direct upload failed: ${err.message}`);
+        return;
+      }
+    }
+
+    // Submit academic resource metadata to /admin/content
     try {
       const res = await fetch(`${API_URL}/admin/content`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          title: uploadTitle,
+          description: uploadDesc,
+          contentType: uploadType,
+          departmentId: uploadDeptId || null,
+          subject: uploadSubject,
+          semester: uploadSemester,
+          yearTarget: uploadYear,
+          fileUrl: finalFileUrl,
+          fileSize: finalFileSize,
+          fileName: finalFileName
+        })
       });
+
+      setIsUploading(false);
+      setUploadProgress(0);
+
       if (res.ok) {
-        setSuccessMsg('Content uploaded and shared with students.');
+        setSuccessMsg('Academic material uploaded and linked successfully using secure S3 storage!');
         setUploadTitle('');
         setUploadDesc('');
         setUploadSubject('');
@@ -339,9 +541,11 @@ export default function AdminPortal() {
         fetchAnalytics();
       } else {
         const data = await res.json();
-        setErrorMsg(data.message || data.error || 'Failed to upload content');
+        setErrorMsg(data.message || data.error || 'Failed to upload academic material');
       }
     } catch (err) {
+      setIsUploading(false);
+      setUploadProgress(0);
       setErrorMsg(`Failed to connect to server: ${err.message}`);
     }
   };
@@ -978,8 +1182,22 @@ export default function AdminPortal() {
                     />
                   </div>
 
-                  <button className="btn btn-primary" style={{ gridColumn: '1 / -1', marginTop: '0.5rem' }}>
-                    <Upload size={16} /> Publish Material
+                  {isUploading && (
+                    <div style={{ gridColumn: '1 / -1', margin: '0.5rem 0' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.25rem', color: 'var(--brand-accent)' }}>
+                        <span>Uploading to S3...</span>
+                        <span>{uploadProgress}%</span>
+                      </div>
+                      <div style={{ width: '100%', height: '6px', background: 'var(--border-color)', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{ width: `${uploadProgress}%`, height: '100%', background: 'var(--brand-accent)', transition: 'width 0.2s ease-in-out' }}></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <button className="btn btn-primary" style={{ gridColumn: '1 / -1', marginTop: '0.5rem' }} disabled={isUploading}>
+                    {isUploading ? 'Uploading to S3...' : <>
+                      <Upload size={16} /> Publish Material
+                    </>}
                   </button>
                 </form>
               </div>
