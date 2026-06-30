@@ -328,64 +328,61 @@ router.post('/students/:id/reject', async (req, res) => {
 // Get all uploaded content for admin's college
 router.get('/content', async (req, res) => {
   try {
-    const collegeId = req.admin.college_id;
+    // Fetch from academic_contents joined with subjects (what the MyVault app reads)
     const sql = `
-      SELECT c.*, d.name as department_name, d.code as department_code, a.name as admin_name
-      FROM content c
-      LEFT JOIN departments d ON c.department_id = d.id
-      LEFT JOIN admins a ON c.uploaded_by = a.id
-      WHERE c.college_id = ?
-      ORDER BY c.created_at DESC
+      SELECT ac.id, ac.title, ac.description, ac.content_type, ac.file_url,
+             ac.created_at, s.name AS subject, s.semester, s.branch AS department_name
+      FROM academic_contents ac
+      LEFT JOIN subjects s ON ac.subject_id = s.id
+      ORDER BY ac.created_at DESC
     `;
-    const contentList = await query(sql, [collegeId]);
+    const contentList = await query(sql, []);
     res.json(contentList);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch content', message: err.message });
   }
 });
 
-// Upload new content (JSON metadata registration only, no Multer file uploads)
+// Upload new content — writes into subjects + academic_contents (read by MyVault app)
 router.post('/content', async (req, res) => {
   try {
-    const collegeId = req.admin.college_id;
     const { title, description, contentType, departmentId, subject, semester, yearTarget, fileUrl, fileSize, fileName } = req.body;
 
     if (!title || !contentType) {
       return res.status(400).json({ error: 'Title and content type are required' });
     }
-
     if (!fileUrl) {
       return res.status(400).json({ error: 'File URL is required' });
     }
 
-    const contentId = generateUUID();
+    const semNum = semester ? parseInt(semester) : 1;
+    const branchCode = departmentId || 'GEN';
+    const subjectName = subject || title;
 
-    // Helper: only pass value if it looks like a valid UUID, else null
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const safeUUID = (val) => (val && uuidRegex.test(val) ? val : null);
-
-    await run(
-      `INSERT INTO content (id, college_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        contentId,
-        safeUUID(collegeId),
-        safeUUID(departmentId),
-        safeUUID(req.admin.id),
-        title,
-        description || '',
-        contentType,
-        fileUrl,
-        fileSize || 0,
-        fileName || '',
-        // Store both subject name and dept code in subject field for student app filtering
-        [subject, departmentId].filter(Boolean).join(' | ') || '',
-        semester ? parseInt(semester) : null,
-        yearTarget ? parseInt(yearTarget) : null
-      ]
+    // 1. Find or create matching subject row
+    let subjectRow = await get(
+      'SELECT id FROM subjects WHERE name = ? AND branch = ? AND semester = ?',
+      [subjectName, branchCode, semNum]
     );
 
-    res.status(201).json({ message: 'Content uploaded successfully', contentId });
+    if (!subjectRow) {
+      const newSubjectId = generateUUID();
+      await run(
+        'INSERT INTO subjects (id, name, branch, semester) VALUES (?, ?, ?, ?)',
+        [newSubjectId, subjectName, branchCode, semNum]
+      );
+      subjectRow = { id: newSubjectId };
+    }
+
+    // 2. Insert into academic_contents (what the MyVault app reads)
+    const contentId = generateUUID();
+    await run(
+      `INSERT INTO academic_contents (id, subject_id, title, content_type, description, file_url)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [contentId, subjectRow.id, title, contentType, description || '', fileUrl]
+    );
+
+    res.status(201).json({ message: 'Content uploaded successfully', contentId, subjectId: subjectRow.id });
   } catch (err) {
     res.status(500).json({ error: 'Failed to upload content', message: err.message });
   }

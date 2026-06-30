@@ -101,6 +101,34 @@ export const initDb = async () => {
     );
   `);
 
+  // Create subjects table if not exists (used by MyVault app)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS subjects (
+      id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      name       VARCHAR(255) NOT NULL,
+      code       VARCHAR(100),
+      branch     VARCHAR(100) NOT NULL,
+      semester   INT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  // Create academic_contents table if not exists (used by MyVault app)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS academic_contents (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      subject_id   UUID NOT NULL REFERENCES subjects(id) ON DELETE CASCADE,
+      title        VARCHAR(500) NOT NULL,
+      content_type VARCHAR(100) NOT NULL,
+      description  TEXT,
+      unit_number  INT,
+      file_url     TEXT,
+      storage_path TEXT,
+      uploaded_by  UUID,
+      created_at   TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   client.release();
   console.log('PostgreSQL verification: Connection successful & database tables verified.');
 };
