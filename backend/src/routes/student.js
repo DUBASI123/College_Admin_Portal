@@ -70,20 +70,21 @@ router.get('/profile', async (req, res) => {
   }
 });
 
+
 // 2. Get Academic Content (with search and filters)
 router.get('/content', async (req, res) => {
   try {
-    const collegeId = req.student.college_id;
-    const { contentType, semester, search } = req.query;
+    const { contentType, semester, year, subject, search } = req.query;
 
+    // Build flexible query - don't filter by college_id since it may be null
     let sql = `
-      SELECT c.*, d.name as department_name, d.code as department_code, a.name as admin_name
+      SELECT c.id, c.title, c.description, c.content_type, c.file_url,
+             c.file_size, c.file_name, c.subject, c.semester, c.year_target,
+             c.created_at, c.is_published
       FROM content c
-      LEFT JOIN departments d ON c.department_id = d.id
-      LEFT JOIN admins a ON c.uploaded_by = a.id
-      WHERE c.college_id = ? AND c.is_published = 1
+      WHERE c.is_published = 1
     `;
-    const params = [collegeId];
+    const params = [];
 
     if (contentType) {
       sql += ' AND c.content_type = ?';
@@ -93,6 +94,16 @@ router.get('/content', async (req, res) => {
     if (semester) {
       sql += ' AND c.semester = ?';
       params.push(parseInt(semester));
+    }
+
+    if (year) {
+      sql += ' AND c.year_target = ?';
+      params.push(parseInt(year));
+    }
+
+    if (subject) {
+      sql += ' AND (c.subject LIKE ? OR c.title LIKE ?)';
+      params.push(`%${subject}%`, `%${subject}%`);
     }
 
     if (search) {
