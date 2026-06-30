@@ -329,28 +329,15 @@ router.post('/students/:id/reject', async (req, res) => {
 router.get('/content', async (req, res) => {
   try {
     const collegeId = req.admin.college_id;
-    let contentList;
-
-    if (process.env.DB_TYPE === 'postgres') {
-      contentList = await query(
-        `SELECT r.id, r.title, r.description, r.resource_type AS content_type, r.file_url, r.created_at,
-                s.name AS subject, s.semester, s.branch AS department_name, s.branch AS department_code,
-                'Admin' AS admin_name
-         FROM academic_resources r
-         LEFT JOIN subjects s ON r.subject_id = s.id
-         ORDER BY r.created_at DESC`
-      );
-    } else {
-      const sql = `
-        SELECT c.*, d.name as department_name, d.code as department_code, a.name as admin_name
-        FROM content c
-        LEFT JOIN departments d ON c.department_id = d.id
-        LEFT JOIN admins a ON c.uploaded_by = a.id
-        WHERE c.college_id = ?
-        ORDER BY c.created_at DESC
-      `;
-      contentList = await query(sql, [collegeId]);
-    }
+    const sql = `
+      SELECT c.*, d.name as department_name, d.code as department_code, a.name as admin_name
+      FROM content c
+      LEFT JOIN departments d ON c.department_id = d.id
+      LEFT JOIN admins a ON c.uploaded_by = a.id
+      WHERE c.college_id = ?
+      ORDER BY c.created_at DESC
+    `;
+    const contentList = await query(sql, [collegeId]);
     res.json(contentList);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch content', message: err.message });
@@ -373,40 +360,14 @@ router.post('/content', async (req, res) => {
 
     const contentId = generateUUID();
 
-    if (process.env.DB_TYPE === 'postgres') {
-      // Find or create subject first
-      const branchName = departmentId || 'CSE';
-      const semNumber = semester ? parseInt(semester) : 1;
-
-      let subjectRow = await get(
-        'SELECT id FROM subjects WHERE name = ? AND branch = ? AND semester = ?',
-        [subject || 'General', branchName, semNumber.toString()]
-      );
-
-      if (!subjectRow) {
-        const newSubjectId = generateUUID();
-        await run(
-          'INSERT INTO subjects (id, name, branch, semester) VALUES (?, ?, ?, ?)',
-          [newSubjectId, subject || 'General', branchName, semNumber.toString()]
-        );
-        subjectRow = { id: newSubjectId };
-      }
-
-      await run(
-        `INSERT INTO academic_resources (id, subject_id, title, resource_type, description, file_url)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [contentId, subjectRow.id, title, contentType, description || '', fileUrl]
-      );
-    } else {
-      await run(
-        `INSERT INTO content (id, college_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          contentId, collegeId, departmentId || null, req.admin.id, title, description || '',
-          contentType, fileUrl, fileSize || 0, fileName || '', subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
-        ]
-      );
-    }
+    await run(
+      `INSERT INTO content (id, college_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        contentId, collegeId, departmentId || null, req.admin.id, title, description || '',
+        contentType, fileUrl, fileSize || 0, fileName || '', subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
+      ]
+    );
 
     res.status(201).json({ message: 'Content uploaded successfully', contentId });
   } catch (err) {
@@ -420,30 +381,21 @@ router.delete('/content/:id', async (req, res) => {
     const { id } = req.params;
     const collegeId = req.admin.college_id;
 
-    if (process.env.DB_TYPE === 'postgres') {
-      const contentItem = await get('SELECT file_url FROM academic_resources WHERE id = ?', [id]);
-      if (!contentItem) {
-        return res.status(404).json({ error: 'Content not found' });
-      }
-
-      await run('DELETE FROM academic_resources WHERE id = ?', [id]);
-    } else {
-      // Verify ownership
-      const contentItem = await get('SELECT file_url FROM content WHERE id = ? AND college_id = ?', [id, collegeId]);
-      if (!contentItem) {
-        return res.status(404).json({ error: 'Content not found' });
-      }
-
-      // Delete file if it exists locally
-      if (contentItem.file_url && contentItem.file_url.startsWith('/uploads/')) {
-        const filePath = join(__dirname, '../../', contentItem.file_url);
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      }
-
-      await run('DELETE FROM content WHERE id = ?', [id]);
+    // Verify ownership
+    const contentItem = await get('SELECT file_url FROM content WHERE id = ? AND college_id = ?', [id, collegeId]);
+    if (!contentItem) {
+      return res.status(404).json({ error: 'Content not found' });
     }
+
+    // Delete file if it exists locally
+    if (contentItem.file_url && contentItem.file_url.startsWith('/uploads/')) {
+      const filePath = join(__dirname, '../../', contentItem.file_url);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+    await run('DELETE FROM content WHERE id = ?', [id]);
     res.json({ message: 'Content deleted successfully' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete content', message: err.message });
