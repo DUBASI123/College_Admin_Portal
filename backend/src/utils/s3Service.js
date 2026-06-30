@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 
@@ -109,5 +109,81 @@ export const getUploadPresignedUrl = async (key, mimeType) => {
   } catch (error) {
     console.error('[S3 Pre-signed Upload URL Error]', error);
     throw error;
+  }
+};
+
+/**
+ * Initiate an S3 multipart upload.
+ */
+export const initiateMultipart = async (key, mimeType) => {
+  try {
+    const command = new CreateMultipartUploadCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      ContentType: mimeType,
+    });
+    const res = await s3Client.send(command);
+    return res.UploadId;
+  } catch (error) {
+    console.error('[S3 Initiate Multipart Error]', error);
+    throw error;
+  }
+};
+
+/**
+ * Generate a pre-signed URL for a specific part in a multipart upload.
+ */
+export const presignUploadPart = async (key, uploadId, partNumber) => {
+  try {
+    const command = new UploadPartCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      UploadId: uploadId,
+      PartNumber: partNumber,
+    });
+    // URL expires in 15 minutes (900 seconds)
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+    return url;
+  } catch (error) {
+    console.error('[S3 Presign Part Error]', error);
+    throw error;
+  }
+};
+
+/**
+ * Complete a multipart upload, joining all parts together.
+ * @param {string} key - S3 Key
+ * @param {string} uploadId - S3 Upload ID
+ * @param {Array<{PartNumber: number, ETag: string}>} parts - Uploaded parts list
+ */
+export const completeMultipart = async (key, uploadId, parts) => {
+  try {
+    const command = new CompleteMultipartUploadCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: { Parts: parts },
+    });
+    const res = await s3Client.send(command);
+    return res;
+  } catch (error) {
+    console.error('[S3 Complete Multipart Error]', error);
+    throw error;
+  }
+};
+
+/**
+ * Abort a multipart upload to clean up S3 storage.
+ */
+export const abortMultipart = async (key, uploadId) => {
+  try {
+    const command = new AbortMultipartUploadCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      UploadId: uploadId,
+    });
+    await s3Client.send(command);
+  } catch (error) {
+    console.error('[S3 Abort Multipart Error]', error);
   }
 };

@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import { get, run, query, generateUUID } from '../db.js';
-import { getPresignedDownloadUrl, deleteFromS3, getUploadPresignedUrl } from '../utils/s3Service.js';
+import { getPresignedDownloadUrl, deleteFromS3, getUploadPresignedUrl, initiateMultipart, presignUploadPart, completeMultipart, abortMultipart } from '../utils/s3Service.js';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -103,6 +103,120 @@ router.post('/confirm', authMiddleware, adminOnly, async (req, res) => {
   } catch (error) {
     console.error('[Confirm Error]', error);
     res.status(500).json({ error: 'Confirm failed', message: error.message });
+  }
+});
+
+// 3. POST /multipart/initiate
+router.post('/multipart/initiate', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { fileName, fileType, category } = req.body;
+    if (!fileName || !fileType || !category) {
+      return res.status(400).json({ error: 'fileName, fileType, and category are required' });
+    }
+
+    const allowedCategories = ['study-materials', 'student-documents', 'assignments', 'certificates'];
+    if (!allowedCategories.includes(category)) {
+      return res.status(400).json({ error: 'Invalid category' });
+    }
+
+    const ext = path.extname(fileName).toLowerCase();
+    const allowedExtensions = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.mp4'];
+    if (!allowedExtensions.includes(ext)) {
+      return res.status(400).json({ error: 'Unsupported file type' });
+    }
+
+    const storedFileName = `${Date.now()}-${crypto.randomBytes(12).toString('hex')}${ext}`;
+    const s3Key = `${category}/${storedFileName}`;
+
+    console.log(`[Multipart Initiate] Initiating S3 multipart upload for ${fileName}`);
+    const uploadId = await initiateMultipart(s3Key, fileType);
+
+    res.json({
+      uploadId,
+      s3Key,
+      storedFileName
+    });
+  } catch (error) {
+    console.error('[Multipart Initiate Error]', error);
+    res.status(500).json({ error: 'Failed to initiate S3 multipart upload', message: error.message });
+  }
+});
+
+// 4. POST /multipart/presign-part
+router.post('/multipart/presign-part', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { s3Key, uploadId, partNumber } = req.body;
+    if (!s3Key || !uploadId || !partNumber) {
+      return res.status(400).json({ error: 's3Key, uploadId, and partNumber are required' });
+    }
+
+    const uploadUrl = await presignUploadPart(s3Key, uploadId, parseInt(partNumber));
+    res.json({ uploadUrl });
+  } catch (error) {
+    console.error('[Multipart Presign Part Error]', error);
+    res.status(500).json({ error: 'Failed to generate part upload URL', message: error.message });
+  }
+});
+
+// 5. POST /multipart/complete
+router.post('/multipart/complete', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { 
+      s3Key, uploadId, parts, 
+      title, description, category, subject, semester, department, 
+      originalFileName, storedFileName, fileSize, mimeType 
+    } = req.body;
+
+    if (!s3Key || !uploadId || !parts || !title || !category || !subject || !semester || !department || !originalFileName || !storedFileName || !fileSize || !mimeType) {
+      return res.status(400).json({ error: 'Missing required S3 upload or metadata fields' });
+    }
+
+    // Sort parts by PartNumber (AWS S3 requires parts to be in order)
+    const sortedParts = parts.sort((a, b) => a.PartNumber - b.PartNumber);
+
+    console.log(`[Multipart Complete] Completing S3 upload for key ${s3Key}`);
+    await completeMultipart(s3Key, uploadId, sortedParts);
+
+    // Save metadata in PostgreSQL
+    const fileId = generateUUID();
+    await run(
+      `INSERT INTO files (id, title, description, category, subject, semester, department, original_file_name, stored_file_name, file_size, mime_type, s3_key, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        fileId, title, description || '', category, subject, semester, department,
+        originalFileName, storedFileName, parseInt(fileSize), mimeType, s3Key, req.userId
+      ]
+    );
+
+    console.log(`[Confirm Log] Time: ${new Date().toISOString()}, User ID: ${req.userId}, Event: MULTIPART_COMPLETE, File: ${storedFileName}, IP: ${req.ip || 'unknown'}`);
+
+    res.status(201).json({
+      message: 'Multipart upload completed and metadata saved successfully',
+      file: {
+        id: fileId, title, description, category, subject, semester, department,
+        original_file_name: originalFileName, file_size: parseInt(fileSize), s3_key: s3Key
+      }
+    });
+  } catch (error) {
+    console.error('[Multipart Complete Error]', error);
+    res.status(500).json({ error: 'Failed to complete multipart upload', message: error.message });
+  }
+});
+
+// 6. POST /multipart/abort
+router.post('/multipart/abort', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { s3Key, uploadId } = req.body;
+    if (!s3Key || !uploadId) {
+      return res.status(400).json({ error: 's3Key and uploadId are required' });
+    }
+
+    console.log(`[Multipart Abort] Aborting S3 upload for key ${s3Key}`);
+    await abortMultipart(s3Key, uploadId);
+    res.json({ message: 'Multipart upload aborted successfully' });
+  } catch (error) {
+    console.error('[Multipart Abort Error]', error);
+    res.status(500).json({ error: 'Failed to abort multipart upload', message: error.message });
   }
 });
 

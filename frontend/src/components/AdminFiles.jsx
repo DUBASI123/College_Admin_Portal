@@ -142,9 +142,112 @@ export default function AdminFiles() {
     setUploading(true);
     setUploadProgress(0);
 
+    const fileSize = selectedFile.size;
+    const CHUNK_SIZE = 5 * 1024 * 1024; // 5MB standard chunk
+
+    // For files smaller than 5MB, use simple single pre-signed URL upload
+    if (fileSize < CHUNK_SIZE) {
+      try {
+        // 1. Get pre-signed URL
+        const urlRes = await fetch(`${API_URL}/files/upload-url`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            fileName: selectedFile.name,
+            fileType: selectedFile.type || 'application/octet-stream',
+            category: formData.category
+          })
+        });
+
+        const urlData = await urlRes.json();
+        if (!urlRes.ok) throw new Error(urlData.error || 'Failed to get upload URL');
+        const { uploadUrl, s3Key, storedFileName } = urlData;
+
+        // 2. Put file to S3
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', uploadUrl);
+        xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
+
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            setUploadProgress(Math.round((event.loaded * 100) / event.total));
+          }
+        };
+
+        xhr.onload = async () => {
+          if (xhr.status === 200) {
+            try {
+              const confirmRes = await fetch(`${API_URL}/files/confirm`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  title: formData.title,
+                  description: formData.description,
+                  category: formData.category,
+                  subject: formData.subject,
+                  semester: formData.semester,
+                  department: formData.department,
+                  originalFileName: selectedFile.name,
+                  storedFileName,
+                  fileSize,
+                  mimeType: selectedFile.type || 'application/octet-stream',
+                  s3Key
+                })
+              });
+
+              const confirmData = await confirmRes.json();
+              setUploading(false);
+              setUploadProgress(0);
+
+              if (confirmRes.ok) {
+                showNotification('success', 'File uploaded to S3 successfully!');
+                setSelectedFile(null);
+                setFormData({ title: '', description: '', category: 'study-materials', subject: '', semester: '1', department: '' });
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                fetchFiles();
+              } else {
+                showNotification('error', confirmData.error || 'Failed to save metadata');
+              }
+            } catch (err) {
+              setUploading(false);
+              setUploadProgress(0);
+              showNotification('error', 'Failed to register upload with backend.');
+            }
+          } else {
+            setUploading(false);
+            setUploadProgress(0);
+            showNotification('error', `S3 upload failed: ${xhr.status}`);
+          }
+        };
+
+        xhr.onerror = () => {
+          setUploading(false);
+          setUploadProgress(0);
+          showNotification('error', 'Network error during S3 upload.');
+        };
+
+        xhr.send(selectedFile);
+      } catch (err) {
+        setUploading(false);
+        setUploadProgress(0);
+        showNotification('error', err.message || 'S3 upload initialization failed.');
+      }
+      return;
+    }
+
+    // For files >= 5MB: Use S3 Multipart Upload
+    let initiatedKey = null;
+    let initiatedId = null;
+
     try {
-      // 1. Get pre-signed upload URL from backend
-      const urlRes = await fetch(`${API_URL}/files/upload-url`, {
+      // 1. Initiate multipart upload
+      const initRes = await fetch(`${API_URL}/files/multipart/initiate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -157,95 +260,133 @@ export default function AdminFiles() {
         })
       });
 
-      const urlData = await urlRes.json();
-      if (!urlRes.ok) {
-        throw new Error(urlData.error || 'Failed to get upload URL');
+      const initData = await initRes.json();
+      if (!initRes.ok) throw new Error(initData.error || 'Failed to initiate multipart upload');
+      const { uploadId, s3Key, storedFileName } = initData;
+      initiatedId = uploadId;
+      initiatedKey = s3Key;
+
+      const totalParts = Math.ceil(fileSize / CHUNK_SIZE);
+      const uploadedParts = [];
+      let totalBytesUploaded = 0;
+
+      // 2. Upload parts sequentially
+      for (let partNumber = 1; partNumber <= totalParts; partNumber++) {
+        const start = (partNumber - 1) * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, fileSize);
+        const chunk = selectedFile.slice(start, end);
+        const chunkLength = end - start;
+
+        // Get pre-signed part upload URL
+        const partUrlRes = await fetch(`${API_URL}/files/multipart/presign-part`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ s3Key, uploadId, partNumber })
+        });
+
+        const partUrlData = await partUrlRes.json();
+        if (!partUrlRes.ok) throw new Error(partUrlData.error || `Failed to sign part ${partNumber}`);
+        const { uploadUrl } = partUrlData;
+
+        // Perform chunk upload using XMLHttpRequest to track progress
+        const partETag = await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', uploadUrl);
+          xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const partLoaded = event.loaded;
+              const overallProgress = Math.round(((totalBytesUploaded + partLoaded) * 100) / fileSize);
+              setUploadProgress(Math.min(overallProgress, 99)); // Max 99% until complete is done
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status === 200) {
+              const etag = xhr.getResponseHeader('ETag');
+              if (etag) {
+                totalBytesUploaded += chunkLength;
+                resolve(etag);
+              } else {
+                reject(new Error(`No ETag header returned for part ${partNumber}`));
+              }
+            } else {
+              reject(new Error(`Part ${partNumber} upload failed with status: ${xhr.status}`));
+            }
+          };
+
+          xhr.onerror = () => reject(new Error(`Network error during part ${partNumber} upload`));
+          xhr.send(chunk);
+        });
+
+        uploadedParts.push({
+          PartNumber: partNumber,
+          ETag: partETag
+        });
       }
 
-      const { uploadUrl, s3Key, storedFileName } = urlData;
+      // 3. Complete multipart upload
+      const completeRes = await fetch(`${API_URL}/files/multipart/complete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          s3Key,
+          uploadId,
+          parts: uploadedParts,
+          title: formData.title,
+          description: formData.description,
+          category: formData.category,
+          subject: formData.subject,
+          semester: formData.semester,
+          department: formData.department,
+          originalFileName: selectedFile.name,
+          storedFileName,
+          fileSize,
+          mimeType: selectedFile.type || 'application/octet-stream'
+        })
+      });
 
-      // 2. Upload file directly to S3 using XMLHttpRequest (to track progress)
-      const xhr = new XMLHttpRequest();
-      xhr.open('PUT', uploadUrl);
-      xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
-
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const percentCompleted = Math.round((event.loaded * 100) / event.total);
-          setUploadProgress(percentCompleted);
-        }
-      };
-
-      xhr.onload = async () => {
-        if (xhr.status === 200) {
-          // 3. Confirm upload metadata with backend to save in PostgreSQL
-          try {
-            const confirmRes = await fetch(`${API_URL}/files/confirm`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                title: formData.title,
-                description: formData.description,
-                category: formData.category,
-                subject: formData.subject,
-                semester: formData.semester,
-                department: formData.department,
-                originalFileName: selectedFile.name,
-                storedFileName,
-                fileSize: selectedFile.size,
-                mimeType: selectedFile.type || 'application/octet-stream',
-                s3Key
-              })
-            });
-
-            const confirmData = await confirmRes.json();
-            setUploading(false);
-            setUploadProgress(0);
-
-            if (confirmRes.ok) {
-              showNotification('success', 'File uploaded directly to AWS S3 and database updated successfully!');
-              setSelectedFile(null);
-              setFormData({
-                title: '',
-                description: '',
-                category: 'study-materials',
-                subject: '',
-                semester: '1',
-                department: ''
-              });
-              if (fileInputRef.current) fileInputRef.current.value = '';
-              fetchFiles();
-            } else {
-              showNotification('error', confirmData.error || 'Failed to save metadata');
-            }
-          } catch (err) {
-            setUploading(false);
-            setUploadProgress(0);
-            showNotification('error', 'Failed to register upload with backend.');
-          }
-        } else {
-          setUploading(false);
-          setUploadProgress(0);
-          showNotification('error', `S3 upload rejected with status code: ${xhr.status}`);
-        }
-      };
-
-      xhr.onerror = () => {
-        setUploading(false);
-        setUploadProgress(0);
-        showNotification('error', 'Network error occurred during Direct S3 upload.');
-      };
-
-      // Send the raw file directly to S3
-      xhr.send(selectedFile);
-
-    } catch (err) {
+      const completeData = await completeRes.json();
       setUploading(false);
       setUploadProgress(0);
-      showNotification('error', err.message || 'Direct S3 initialization failed.');
+
+      if (completeRes.ok) {
+        showNotification('success', 'Large file uploaded and joined on S3 successfully! (Multipart)');
+        setSelectedFile(null);
+        setFormData({ title: '', description: '', category: 'study-materials', subject: '', semester: '1', department: '' });
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        fetchFiles();
+      } else {
+        showNotification('error', completeData.error || 'Failed to complete multipart upload');
+      }
+    } catch (err) {
+      console.error('[Multipart Upload Error]', err);
+      // Abort S3 upload on backend to clean up storage
+      if (initiatedKey && initiatedId) {
+        try {
+          await fetch(`${API_URL}/files/multipart/abort`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`
+            },
+            body: JSON.stringify({ s3Key: initiatedKey, uploadId: initiatedId })
+          });
+        } catch (abortErr) {
+          console.error('Failed to abort upload:', abortErr);
+        }
+      }
+
+      setUploading(false);
+      setUploadProgress(0);
+      showNotification('error', err.message || 'Multipart S3 upload failed.');
     }
   };
 
