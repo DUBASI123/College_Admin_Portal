@@ -24,6 +24,7 @@ We have successfully cleaned the `college_platfrom` repository (reverting it to 
   * `DELETE /api/files/:id`: Clears file from S3 and database.
 * **[MODIFY] [admin.js](file:///C:/Users/dubas/Desktop/College_Admin/backend/src/routes/admin.js)**:
   * Upgraded `/content` publishing endpoint to accept pre-uploaded S3 file URLs, completely removing local Multer file buffering and Cloudinary uploader dependencies.
+  * Unified CRUD content routes to write and read from the `content` table in both SQLite and PostgreSQL, resolving the `relation "academic_resources" does not exist` error and linking it directly to the student app.
 * **[MODIFY] [db.js](file:///C:/Users/dubas/Desktop/College_Admin/backend/src/db.js)**: Added logic to dynamically check and create the `files` PostgreSQL table on database pool initialization.
 * **[MODIFY] [server.js](file:///C:/Users/dubas/Desktop/College_Admin/backend/src/server.js)**: Mounted `/api/files` router.
 * **[MODIFY] [.env](file:///C:/Users/dubas/Desktop/College_Admin/backend/.env)**: Saved active AWS credentials:
