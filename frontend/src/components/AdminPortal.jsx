@@ -492,8 +492,9 @@ export default function AdminPortal() {
           });
         }
 
-        // Set S3 public proxy URL for academic resources
-        finalFileUrl = `${API_URL}/files/public/${s3Key}`;
+        // Point to MyVault backend S3 redirect endpoint (Flutter app reads this URL)
+        const MYVAULT_BACKEND = 'https://myvault-jbd7.onrender.com';
+        finalFileUrl = `${MYVAULT_BACKEND}/api/s3/redirect/${s3Key}`;
         finalFileName = uploadFile.name;
         finalFileSize = fileSize;
 
