@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand, CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand, AbortMultipartUploadCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 
@@ -186,4 +186,15 @@ export const abortMultipart = async (key, uploadId) => {
   } catch (error) {
     console.error('[S3 Abort Multipart Error]', error);
   }
+};
+
+/**
+ * Perform a simple ListObjectsV2 call to test connection and permissions.
+ */
+export const testS3Connection = async () => {
+  const command = new ListObjectsV2Command({
+    Bucket: process.env.AWS_BUCKET_NAME,
+    MaxKeys: 1,
+  });
+  await s3Client.send(command);
 };

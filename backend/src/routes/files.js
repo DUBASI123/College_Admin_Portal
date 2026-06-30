@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import crypto from 'crypto';
 import { get, run, query, generateUUID } from '../db.js';
-import { getPresignedDownloadUrl, deleteFromS3, getUploadPresignedUrl, initiateMultipart, presignUploadPart, completeMultipart, abortMultipart } from '../utils/s3Service.js';
+import { getPresignedDownloadUrl, deleteFromS3, getUploadPresignedUrl, initiateMultipart, presignUploadPart, completeMultipart, abortMultipart, testS3Connection } from '../utils/s3Service.js';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -20,6 +20,46 @@ router.get('/public/files/*', async (req, res) => {
   } catch (error) {
     console.error('[Public Proxy Error]', error);
     res.status(500).send('Failed to retrieve file from S3');
+  }
+});
+
+// Public S3 config and connection diagnostic endpoint
+router.get('/debug-s3', async (req, res) => {
+  try {
+    const bucket = process.env.AWS_BUCKET_NAME || 'not_configured';
+    const region = process.env.AWS_REGION || 'not_configured';
+    const hasAccessKey = !!process.env.AWS_ACCESS_KEY_ID;
+    const hasSecretKey = !!process.env.AWS_SECRET_ACCESS_KEY;
+    const accessKeyStart = process.env.AWS_ACCESS_KEY_ID ? process.env.AWS_ACCESS_KEY_ID.substring(0, 6) + '...' : 'none';
+
+    let s3Success = false;
+    let s3Error = null;
+
+    try {
+      await testS3Connection();
+      s3Success = true;
+    } catch (err) {
+      s3Error = {
+        message: err.message,
+        code: err.code,
+        name: err.name,
+        stack: err.stack
+      };
+    }
+
+    res.json({
+      config: {
+        bucket,
+        region,
+        hasAccessKey,
+        hasSecretKey,
+        accessKeyStart
+      },
+      s3Success,
+      s3Error
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
