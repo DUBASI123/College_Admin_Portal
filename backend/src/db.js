@@ -77,6 +77,30 @@ export const initDb = async () => {
     );
   `);
 
+  // Create content table if not exists (for Academic Hub materials)
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS content (
+      id              UUID PRIMARY KEY,
+      college_id      UUID,
+      category_id     UUID,
+      department_id   UUID,
+      uploaded_by     UUID,
+      title           VARCHAR(500) NOT NULL,
+      description     TEXT,
+      content_type    VARCHAR(50) NOT NULL,
+      file_url        TEXT,
+      file_size       BIGINT,
+      file_name       TEXT,
+      subject         VARCHAR(255),
+      semester        SMALLINT,
+      year_target     SMALLINT,
+      view_count      INT DEFAULT 0,
+      is_published    INT DEFAULT 1,
+      created_at      TIMESTAMPTZ DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
   client.release();
-  console.log('PostgreSQL verification: Connection successful & files table verified.');
+  console.log('PostgreSQL verification: Connection successful & database tables verified.');
 };
