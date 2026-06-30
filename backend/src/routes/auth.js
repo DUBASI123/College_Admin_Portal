@@ -87,17 +87,15 @@ router.post('/admin/register', upload.single('idCard'), async (req, res) => {
         if (mime.startsWith('image/')) cloudinaryResourceType = 'image';
 
         const tryCloudinaryUpload = async (resourceType) => {
-          const formData = new FormData();
-          formData.append('file', req.file.buffer, {
-            filename: req.file.originalname,
-            contentType: req.file.mimetype
-          });
-          formData.append('upload_preset', 'myvault_unsigned');
+          const base64File = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+          const bodyParams = new URLSearchParams();
+          bodyParams.append('file', base64File);
+          bodyParams.append('upload_preset', 'myvault_unsigned');
+          bodyParams.append('public_id', `id_card_${Date.now()}`);
 
           const uploadRes = await fetch(`https://api.cloudinary.com/v1_1/dtdb4irno/${resourceType}/upload`, {
             method: 'POST',
-            headers: formData.getHeaders(),
-            body: formData
+            body: bodyParams
           });
           const data = await uploadRes.json();
           if (data.secure_url) return data.secure_url;

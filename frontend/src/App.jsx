@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import LandingPage from './components/LandingPage';
 import AdminPortal from './components/AdminPortal';
-import { Building, Home, Sparkles } from 'lucide-react';
+import Materials from './components/Materials';
+import AdminFiles from './components/AdminFiles';
+import { Building, Home, Sparkles, BookOpen, Upload } from 'lucide-react';
 
 export default function App() {
-  const [currentView, setCurrentView] = useState('landing'); // 'landing' | 'admin-portal'
+  const [currentView, setCurrentView] = useState('landing'); // 'landing' | 'admin-portal' | 'materials' | 'admin-files'
 
   return (
     <div className="app-root">
@@ -25,6 +27,26 @@ export default function App() {
               >
                 <Home size={14} />
                 Home
+              </button>
+            </li>
+            <li>
+              <button 
+                className={`sidebar-tab ${currentView === 'materials' ? 'active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                onClick={() => setCurrentView('materials')}
+              >
+                <BookOpen size={14} />
+                Study Materials
+              </button>
+            </li>
+            <li>
+              <button 
+                className={`sidebar-tab ${currentView === 'admin-files' ? 'active' : ''}`}
+                style={{ padding: '0.4rem 0.8rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                onClick={() => setCurrentView('admin-files')}
+              >
+                <Upload size={14} />
+                Upload S3 Files
               </button>
             </li>
             <li>
@@ -52,6 +74,8 @@ export default function App() {
       <main className="view-container">
         {currentView === 'landing' && <LandingPage onNavigate={setCurrentView} />}
         {currentView === 'admin-portal' && <AdminPortal />}
+        {currentView === 'materials' && <Materials />}
+        {currentView === 'admin-files' && <AdminFiles />}
       </main>
     </div>
   );

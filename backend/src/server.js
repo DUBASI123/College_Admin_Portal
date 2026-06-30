@@ -8,6 +8,7 @@ import { initDb } from './db.js';
 import authRouter from './routes/auth.js';
 import adminRouter from './routes/admin.js';
 import studentRouter from './routes/student.js';
+import filesRouter from './routes/files.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -39,6 +40,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/student', studentRouter);
+app.use('/api/files', filesRouter);
 
 // Serve uploaded files statically
 app.use('/uploads', express.static(uploadsDir));

@@ -54,6 +54,29 @@ export const generateUUID = () => crypto.randomUUID();
 export const initDb = async () => {
   // Test connection
   const client = await pgPool.connect();
+  
+  // Create files table if not exists
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS files (
+      id UUID PRIMARY KEY,
+      title VARCHAR(255) NOT NULL,
+      description TEXT,
+      category VARCHAR(50) NOT NULL,
+      subject VARCHAR(255) NOT NULL,
+      semester VARCHAR(50) NOT NULL,
+      department VARCHAR(255) NOT NULL,
+      original_file_name VARCHAR(255) NOT NULL,
+      stored_file_name VARCHAR(255) NOT NULL,
+      file_size BIGINT NOT NULL,
+      mime_type VARCHAR(100) NOT NULL,
+      s3_key TEXT NOT NULL,
+      uploaded_by UUID,
+      uploaded_at TIMESTAMPTZ DEFAULT NOW(),
+      last_modified TIMESTAMPTZ DEFAULT NOW(),
+      status VARCHAR(20) DEFAULT 'Active'
+    );
+  `);
+
   client.release();
-  console.log('PostgreSQL verification: Connection successful.');
+  console.log('PostgreSQL verification: Connection successful & files table verified.');
 };
