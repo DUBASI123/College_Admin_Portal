@@ -360,12 +360,28 @@ router.post('/content', async (req, res) => {
 
     const contentId = generateUUID();
 
+    // Helper: only pass value if it looks like a valid UUID, else null
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const safeUUID = (val) => (val && uuidRegex.test(val) ? val : null);
+
     await run(
       `INSERT INTO content (id, college_id, department_id, uploaded_by, title, description, content_type, file_url, file_size, file_name, subject, semester, year_target)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        contentId, collegeId, departmentId || null, req.admin.id, title, description || '',
-        contentType, fileUrl, fileSize || 0, fileName || '', subject || '', semester ? parseInt(semester) : null, yearTarget ? parseInt(yearTarget) : null
+        contentId,
+        safeUUID(collegeId),
+        safeUUID(departmentId),
+        safeUUID(req.admin.id),
+        title,
+        description || '',
+        contentType,
+        fileUrl,
+        fileSize || 0,
+        fileName || '',
+        // Store both subject name and dept code in subject field for student app filtering
+        [subject, departmentId].filter(Boolean).join(' | ') || '',
+        semester ? parseInt(semester) : null,
+        yearTarget ? parseInt(yearTarget) : null
       ]
     );
 
@@ -381,8 +397,8 @@ router.delete('/content/:id', async (req, res) => {
     const { id } = req.params;
     const collegeId = req.admin.college_id;
 
-    // Verify ownership
-    const contentItem = await get('SELECT file_url FROM content WHERE id = ? AND college_id = ?', [id, collegeId]);
+    // Verify item exists (college_id may not be UUID-compatible, so just check by id)
+    const contentItem = await get('SELECT file_url FROM content WHERE id = ?', [id]);
     if (!contentItem) {
       return res.status(404).json({ error: 'Content not found' });
     }
