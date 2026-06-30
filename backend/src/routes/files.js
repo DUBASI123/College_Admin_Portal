@@ -9,14 +9,16 @@ const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'myvault_jwt_secret_key_12345';
 
 // Public proxy route for S3 downloads (no auth required)
-router.get('/public/files/*', async (req, res) => {
+// Supports any files under /public/* (like old /public/study-materials/*)
+router.get('/public/*', async (req, res) => {
   try {
     const key = req.params[0];
     if (!key) {
       return res.status(400).json({ error: 'File key is required' });
     }
-    const downloadUrl = await getPresignedDownloadUrl(key);
-    res.redirect(downloadUrl);
+    // Clean up any extra "files/" prefix if it was stored incorrectly
+    const cleanKey = key.startsWith('files/') ? key.substring(6) : key;
+    res.redirect(`https://myvault-jbd7.onrender.com/api/s3/redirect/${cleanKey}`);
   } catch (error) {
     console.error('[Public Proxy Error]', error);
     res.status(500).send('Failed to retrieve file from S3');
