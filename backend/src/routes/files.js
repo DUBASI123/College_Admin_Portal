@@ -1,11 +1,8 @@
 import express from 'express';
 import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
-import multer from 'multer';
-import { fileURLToPath } from 'url';
 import { get, run, query, generateUUID } from '../db.js';
-import { uploadToS3, getPresignedDownloadUrl, deleteFromS3 } from '../utils/s3Service.js';
+import { getPresignedDownloadUrl, deleteFromS3, getUploadPresignedUrl } from '../utils/s3Service.js';
 import jwt from 'jsonwebtoken';
 
 const router = express.Router();
@@ -37,40 +34,13 @@ const adminOnly = (req, res, next) => {
   next();
 };
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const tempDir = path.join(__dirname, '../../temp_uploads');
-if (!fs.existsSync(tempDir)) {
-  fs.mkdirSync(tempDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, tempDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = crypto.randomBytes(8).toString('hex');
-    cb(null, `${Date.now()}-${uniqueSuffix}${path.extname(file.originalname)}`);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 1024 * 1024 * 1024 } // 1 GB
-});
-
-// 1. POST /upload
-router.post('/upload', authMiddleware, adminOnly, upload.single('file'), async (req, res) => {
-  let tempFilePath = null;
+// 1. POST /upload-url
+router.post('/upload-url', authMiddleware, adminOnly, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    const { fileName, fileType, category } = req.body;
 
-    tempFilePath = req.file.path;
-    const { title, description, category, subject, semester, department } = req.body;
-
-    if (!title || !category || !subject || !semester || !department) {
-      return res.status(400).json({ error: 'Title, category, subject, semester, and department are required' });
+    if (!fileName || !fileType || !category) {
+      return res.status(400).json({ error: 'fileName, fileType, and category are required' });
     }
 
     const allowedCategories = ['study-materials', 'student-documents', 'assignments', 'certificates'];
@@ -78,7 +48,7 @@ router.post('/upload', authMiddleware, adminOnly, upload.single('file'), async (
       return res.status(400).json({ error: 'Invalid category' });
     }
 
-    const ext = path.extname(req.file.originalname).toLowerCase();
+    const ext = path.extname(fileName).toLowerCase();
     const allowedExtensions = ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.zip', '.rar', '.jpg', '.jpeg', '.png', '.mp4'];
     if (!allowedExtensions.includes(ext)) {
       return res.status(400).json({ error: 'Unsupported file type' });
@@ -87,9 +57,28 @@ router.post('/upload', authMiddleware, adminOnly, upload.single('file'), async (
     const storedFileName = `${Date.now()}-${crypto.randomBytes(12).toString('hex')}${ext}`;
     const s3Key = `${category}/${storedFileName}`;
 
-    console.log(`[Upload] Starting S3 multipart upload for ${req.file.originalname} (${req.file.size} bytes)`);
-    const fileStream = fs.createReadStream(tempFilePath);
-    await uploadToS3(fileStream, s3Key, req.file.mimetype);
+    console.log(`[Upload URL] Generating pre-signed S3 upload URL for ${fileName}`);
+    const uploadUrl = await getUploadPresignedUrl(s3Key, fileType);
+
+    res.json({
+      uploadUrl,
+      s3Key,
+      storedFileName
+    });
+  } catch (error) {
+    console.error('[Upload URL Error]', error);
+    res.status(500).json({ error: 'Failed to generate S3 pre-signed upload URL', message: error.message });
+  }
+});
+
+// 2. POST /confirm
+router.post('/confirm', authMiddleware, adminOnly, async (req, res) => {
+  try {
+    const { title, description, category, subject, semester, department, originalFileName, storedFileName, fileSize, mimeType, s3Key } = req.body;
+
+    if (!title || !category || !subject || !semester || !department || !originalFileName || !storedFileName || !fileSize || !mimeType || !s3Key) {
+      return res.status(400).json({ error: 'Missing required file metadata fields' });
+    }
 
     const fileId = generateUUID();
 
@@ -98,30 +87,22 @@ router.post('/upload', authMiddleware, adminOnly, upload.single('file'), async (
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         fileId, title, description || '', category, subject, semester, department,
-        req.file.originalname, storedFileName, req.file.size, req.file.mimetype, s3Key, req.userId
+        originalFileName, storedFileName, parseInt(fileSize), mimeType, s3Key, req.userId
       ]
     );
 
-    console.log(`[Upload Log] Time: ${new Date().toISOString()}, User ID: ${req.userId}, Event: UPLOAD, File: ${storedFileName}, IP: ${req.ip || 'unknown'}`);
+    console.log(`[Confirm Log] Time: ${new Date().toISOString()}, User ID: ${req.userId}, Event: UPLOAD_CONFIRM, File: ${storedFileName}, IP: ${req.ip || 'unknown'}`);
 
     res.status(201).json({
-      message: 'File uploaded and metadata saved successfully',
+      message: 'File metadata saved successfully',
       file: {
         id: fileId, title, description, category, subject, semester, department,
-        original_file_name: req.file.originalname, file_size: req.file.size, s3_key: s3Key
+        original_file_name: originalFileName, file_size: parseInt(fileSize), s3_key: s3Key
       }
     });
   } catch (error) {
-    console.error('[Upload Error]', error);
-    res.status(500).json({ error: 'Upload failed', message: error.message });
-  } finally {
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      try {
-        fs.unlinkSync(tempFilePath);
-      } catch (err) {
-        console.error('[Cleanup Error]', err);
-      }
-    }
+    console.error('[Confirm Error]', error);
+    res.status(500).json({ error: 'Confirm failed', message: error.message });
   }
 });
 

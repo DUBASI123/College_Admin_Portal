@@ -132,69 +132,121 @@ export default function AdminFiles() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleUploadSubmit = (e) => {
+  const handleUploadSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFile) {
       showNotification('error', 'Please select or drag a file to upload.');
       return;
     }
 
-    const uploadPayload = new FormData();
-    uploadPayload.append('file', selectedFile);
-    uploadPayload.append('title', formData.title);
-    uploadPayload.append('description', formData.description);
-    uploadPayload.append('category', formData.category);
-    uploadPayload.append('subject', formData.subject);
-    uploadPayload.append('semester', formData.semester);
-    uploadPayload.append('department', formData.department);
-
     setUploading(true);
     setUploadProgress(0);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_URL}/files/upload`);
-    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    try {
+      // 1. Get pre-signed upload URL from backend
+      const urlRes = await fetch(`${API_URL}/files/upload-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          fileName: selectedFile.name,
+          fileType: selectedFile.type || 'application/octet-stream',
+          category: formData.category
+        })
+      });
 
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        const percentCompleted = Math.round((event.loaded * 100) / event.total);
-        setUploadProgress(percentCompleted);
+      const urlData = await urlRes.json();
+      if (!urlRes.ok) {
+        throw new Error(urlData.error || 'Failed to get upload URL');
       }
-    };
 
-    xhr.onload = () => {
-      setUploading(false);
-      setUploadProgress(0);
-      try {
-        const responseData = JSON.parse(xhr.responseText);
-        if (xhr.status === 201) {
-          showNotification('success', 'File uploaded and S3 storage allocated successfully!');
-          setSelectedFile(null);
-          setFormData({
-            title: '',
-            description: '',
-            category: 'study-materials',
-            subject: '',
-            semester: '1',
-            department: ''
-          });
-          if (fileInputRef.current) fileInputRef.current.value = '';
-          fetchFiles();
-        } else {
-          showNotification('error', responseData.error || responseData.message || 'Upload failed');
+      const { uploadUrl, s3Key, storedFileName } = urlData;
+
+      // 2. Upload file directly to S3 using XMLHttpRequest (to track progress)
+      const xhr = new XMLHttpRequest();
+      xhr.open('PUT', uploadUrl);
+      xhr.setRequestHeader('Content-Type', selectedFile.type || 'application/octet-stream');
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percentCompleted = Math.round((event.loaded * 100) / event.total);
+          setUploadProgress(percentCompleted);
         }
-      } catch (err) {
-        showNotification('error', 'Server responded with an invalid response.');
-      }
-    };
+      };
 
-    xhr.onerror = () => {
+      xhr.onload = async () => {
+        if (xhr.status === 200) {
+          // 3. Confirm upload metadata with backend to save in PostgreSQL
+          try {
+            const confirmRes = await fetch(`${API_URL}/files/confirm`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                title: formData.title,
+                description: formData.description,
+                category: formData.category,
+                subject: formData.subject,
+                semester: formData.semester,
+                department: formData.department,
+                originalFileName: selectedFile.name,
+                storedFileName,
+                fileSize: selectedFile.size,
+                mimeType: selectedFile.type || 'application/octet-stream',
+                s3Key
+              })
+            });
+
+            const confirmData = await confirmRes.json();
+            setUploading(false);
+            setUploadProgress(0);
+
+            if (confirmRes.ok) {
+              showNotification('success', 'File uploaded directly to AWS S3 and database updated successfully!');
+              setSelectedFile(null);
+              setFormData({
+                title: '',
+                description: '',
+                category: 'study-materials',
+                subject: '',
+                semester: '1',
+                department: ''
+              });
+              if (fileInputRef.current) fileInputRef.current.value = '';
+              fetchFiles();
+            } else {
+              showNotification('error', confirmData.error || 'Failed to save metadata');
+            }
+          } catch (err) {
+            setUploading(false);
+            setUploadProgress(0);
+            showNotification('error', 'Failed to register upload with backend.');
+          }
+        } else {
+          setUploading(false);
+          setUploadProgress(0);
+          showNotification('error', `S3 upload rejected with status code: ${xhr.status}`);
+        }
+      };
+
+      xhr.onerror = () => {
+        setUploading(false);
+        setUploadProgress(0);
+        showNotification('error', 'Network error occurred during Direct S3 upload.');
+      };
+
+      // Send the raw file directly to S3
+      xhr.send(selectedFile);
+
+    } catch (err) {
       setUploading(false);
       setUploadProgress(0);
-      showNotification('error', 'Network error occurred during S3 upload.');
-    };
-
-    xhr.send(uploadPayload);
+      showNotification('error', err.message || 'Direct S3 initialization failed.');
+    }
   };
 
   const handleDeleteFile = async (id) => {

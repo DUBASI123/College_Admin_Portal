@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 
@@ -85,6 +85,29 @@ export const deleteFromS3 = async (key) => {
     return result;
   } catch (error) {
     console.error('[S3 Delete Error]', error);
+    throw error;
+  }
+};
+
+/**
+ * Generate a pre-signed S3 upload URL for direct client-side uploads.
+ * 
+ * @param {string} key - S3 object key
+ * @param {string} mimeType - File mime type
+ * @returns {Promise<string>} Pre-signed upload URL (expires in 15 minutes)
+ */
+export const getUploadPresignedUrl = async (key, mimeType) => {
+  try {
+    const command = new PutObjectCommand({
+      Bucket: process.env.AWS_BUCKET_NAME,
+      Key: key,
+      ContentType: mimeType,
+    });
+    // URL expires in 15 minutes (900 seconds)
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 900 });
+    return url;
+  } catch (error) {
+    console.error('[S3 Pre-signed Upload URL Error]', error);
     throw error;
   }
 };
